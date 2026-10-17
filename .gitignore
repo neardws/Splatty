@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+*.swp
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package
+.build/
+.swiftpm/
+
+# Python / train
+__pycache__/
+.venv/
+*.ply
+*.spz
+*.psht
+
+# Secrets / local
+.env
+*.pem
