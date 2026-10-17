@@ -21,19 +21,34 @@ xcodegen generate                # writes Splatty.xcodeproj (git-ignored)
 open Splatty.xcodeproj
 ```
 
-Then in Xcode:
+`project.yml` already sets `DEVELOPMENT_TEAM` to `YNQ2233752` (same as MacShot / Octoshot).
 
-1. Select the **Splatty** target → **Signing & Capabilities** → choose your **Team**
-   (`DEVELOPMENT_TEAM` is intentionally empty in `project.yml`). If the bundle id
-   `com.neardws.splatty` is taken for your team, change it there (or in `project.yml`).
-2. Plug in the iPhone (Developer Mode on), pick it as the run destination, **⌘R**.
-3. First launch: allow camera access.
+### Simulator (verified)
+
+```bash
+xcodegen generate
+xcodebuild -project Splatty.xcodeproj -scheme Splatty \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build
+```
+
+Verified **BUILD SUCCEEDED** on Neil's Mac mini (Xcode 26.2 / iOS Simulator 26.3.1, iPhone 17 Pro) on 2026-10-17. `SplattyCore` `swift test`: 33/33 pass.
+
+### Real iPhone
+
+ARKit capture needs a physical device (simulator has no camera / world tracking).
+
+1. Open `Splatty.xcodeproj` in Xcode (or run `open Splatty.xcodeproj` after `xcodegen generate`).
+2. Confirm **Splatty** target → **Signing & Capabilities** → Team is **Xincao Xu (YNQ2233752)**. If the bundle id `com.neardws.splatty` clashes, change it there (or in `project.yml` and regenerate).
+3. On the iPhone: **Settings → Privacy & Security → Developer Mode → On**, then reboot if prompted.
+4. USB-connect (or wireless after pairing) the phone; unlock it and tap **Trust**.
+5. In Xcode pick the phone as the run destination → **⌘R**.
+6. First launch: allow **Camera** (and motion/AR if prompted).
 
 CLI alternative:
 
 ```bash
 xcodebuild -project Splatty.xcodeproj -scheme Splatty \
-  -destination 'generic/platform=iOS' DEVELOPMENT_TEAM=XXXXXXXXXX -allowProvisioningUpdates build
+  -destination 'generic/platform=iOS' -allowProvisioningUpdates build
 ```
 
 ### Tests

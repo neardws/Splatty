@@ -22,9 +22,8 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
-    # Left empty on purpose. Pick your team in Xcode → Splatty target →
-    # Signing & Capabilities, or pass DEVELOPMENT_TEAM=XXXXXXXXXX to xcodebuild.
-    DEVELOPMENT_TEAM: ""
+    # Same team as MacShot / Octoshot on this Mac mini.
+    DEVELOPMENT_TEAM: YNQ2233752
 
 targets:
   Splatty:
