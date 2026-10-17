@@ -9,7 +9,7 @@ import UIKit
 /// one auto-shot per uncovered bin, and handing shots to `ShotWriter`.
 @MainActor
 @Observable
-final class CaptureController: NSObject {
+final class CaptureController: NSObject, ARCaptureHost {
     enum Phase: Equatable {
         /// Waiting for the user to tap the object centre.
         case placing
@@ -71,6 +71,10 @@ final class CaptureController: NSObject {
     @ObservationIgnored private var completedRingTime: Double = 0
     @ObservationIgnored private var useHighRes: Bool
     @ObservationIgnored var onMetaChanged: (@MainActor (AssetMeta) -> Void)?
+    @ObservationIgnored private var log = CaptureLog(captureMode: CaptureMode.orbit.rawValue,
+                                                     startedAt: AssetNaming.iso8601(Date(), timeZone: .current))
+    @ObservationIgnored private var lastLoggedRejection: CaptureWarning?
+    @ObservationIgnored private var videoFormat: ARConfiguration.VideoFormat?
 
     init(meta: AssetMeta, layout: AssetLayout, settings: CaptureSettings) {
         self.meta = meta
@@ -99,6 +103,10 @@ final class CaptureController: NSObject {
         runConfiguration(reset: true)
     }
 
+    func handleTap(at point: CGPoint, in view: ARView) {
+        setAnchor(at: point, in: view)
+    }
+
     func stop() {
         if exposureLocked { setExposureLocked(false) }
         arView?.session.pause()
@@ -125,6 +133,7 @@ final class CaptureController: NSObject {
         if depthEnabled, ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             config.frameSemantics.insert(.sceneDepth)
         }
+        videoFormat = config.videoFormat
         let r = config.videoFormat.imageResolution
         videoFormatLabel = "\(Int(r.width))×\(Int(r.height))@\(config.videoFormat.framesPerSecond)"
             + (useHighRes ? " + hi-res" : "")
@@ -294,6 +303,10 @@ final class CaptureController: NSObject {
             case .rejected(let w):
                 rejection = w
                 lastRejectionTime = now
+                if w != lastLoggedRejection {
+                    log.add("rejected", w.message, t: now)
+                    lastLoggedRejection = w
+                }
             case .idle:
                 if rejection != nil, now - lastRejectionTime > 1.2 { rejection = nil }
             }
@@ -340,6 +353,8 @@ final class CaptureController: NSObject {
         let capturedAt = AssetNaming.iso8601(Date(), timeZone: .current)
         let includeDepth = depthEnabled
         lastShotTime = frame.timestamp
+        lastLoggedRejection = nil
+        log.add("shot", "#\(index) \(TurntableCaptureController.cameraState())", t: frame.timestamp)
         shutterFlash += 1
         haptics.shot()
         // Mark the bin immediately so we never fire twice in it while saving.
@@ -353,7 +368,7 @@ final class CaptureController: NSObject {
             }
             return
         }
-        session.captureHighResolutionFrame { hiFrame, error in
+        TurntableCaptureController.captureHighRes(session: session, format: videoFormat) { hiFrame, error in
             let payload: ShotPayload
             if let hiFrame {
                 payload = ShotPayload(index: index, highResFrame: hiFrame, includeDepth: includeDepth,
@@ -432,9 +447,18 @@ final class CaptureController: NSObject {
             videoFormat: videoFormatLabel,
             exposureLocked: exposureLocked
         )
+        meta.capture?.captureMode = .orbit
+        meta.capture?.preset = settings.planPreset.rawValue
+        if let d = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera {
+            meta.capture?.whiteBalanceLocked = d.whiteBalanceMode == .locked
+            meta.capture?.focusLocked = d.focusMode == .locked
+        }
+        meta.schemaVersion = AssetMeta.currentSchemaVersion
+        meta.captureMode = .orbit
+        meta.posesValid = true
         let snapshot = meta
         onMetaChanged?(snapshot)
-        writer.persist(frames: records, anchor: anchor, meta: snapshot) { error in
+        writer.persist(frames: records, anchor: anchor, meta: snapshot, log: log) { error in
             guard let error else { return }
             let message = error.localizedDescription
             Task { @MainActor in self.lastError = "保存元数据失败：\(message)" }

@@ -16,7 +16,14 @@ struct CaptureSettings: Sendable, Equatable {
         static let highResolution = "capture.highResolution"
         static let depth = "capture.depth"
         static let jpegQuality = "capture.jpegQuality"
+        static let mode = "capture.mode"
+        static let voice = "capture.voice"
     }
+
+    /// Default: turntable (桌面小物件).
+    var mode: CaptureMode = .turntable
+    var voice: Bool = true
+    var turntablePlan: TurntablePlan { TurntablePlan.preset(planPreset) }
 
     var planPreset: CapturePlan.Preset = .standard
     var plan: CapturePlan { CapturePlan.preset(planPreset) }
@@ -31,6 +38,8 @@ struct CaptureSettings: Sendable, Equatable {
         if let f = d.string(forKey: Keys.imageFormat), let fmt = ImageFormat(rawValue: f) { s.imageFormat = fmt }
         if d.object(forKey: Keys.highResolution) != nil { s.highResolution = d.bool(forKey: Keys.highResolution) }
         if d.object(forKey: Keys.depth) != nil { s.depthEnabled = d.bool(forKey: Keys.depth) }
+        if let m = d.string(forKey: Keys.mode), let mode = CaptureMode(rawValue: m) { s.mode = mode }
+        if d.object(forKey: Keys.voice) != nil { s.voice = d.bool(forKey: Keys.voice) }
         if d.object(forKey: Keys.jpegQuality) != nil { s.quality = min(1, max(0.5, d.double(forKey: Keys.jpegQuality))) }
         return s
     }

@@ -174,6 +174,12 @@ public struct TurntableCoverage: Equatable, Sendable {
         return b
     }
 
+    /// Undo a `record` (e.g. the image failed to save).
+    public mutating func remove(_ r: TurntableRing, bin: Int) {
+        guard counts[r.rawValue].indices.contains(bin), counts[r.rawValue][bin] > 0 else { return }
+        counts[r.rawValue][bin] -= 1
+    }
+
     public func coveredCount(_ r: TurntableRing) -> Int {
         if r == .top && plan.topShots == 0 { return 0 }
         return counts[r.rawValue].filter { $0 > 0 }.count

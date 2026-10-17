@@ -81,7 +81,15 @@ public struct RotationTracker: Sendable {
     public var flowPixelsPerSecond: Double { speedDegreesPerSecond * .pi / 180 * lastRadiusPixels }
 
     public mutating func ingest(_ s: Sample) -> Output {
-        guard s.phoneSteady, let shift = s.shift, let axis = s.axis, s.radiusPixels > 1 else {
+        // Phone moving (e.g. being raised to the next height): not the estimator's fault,
+        // so re-key without counting it against reliability.
+        guard s.phoneSteady else {
+            keyDegrees = signedDegrees
+            speedDegreesPerSecond *= (1 - smoothing)
+            last = (signedDegrees, s.timestamp)
+            return Output(rekey: true, accepted: false)
+        }
+        guard let shift = s.shift, let axis = s.axis, s.radiusPixels > 1 else {
             fail(s.timestamp)
             return Output(rekey: true, accepted: false)
         }

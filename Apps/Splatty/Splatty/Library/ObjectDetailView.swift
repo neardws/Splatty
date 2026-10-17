@@ -11,7 +11,10 @@ struct ObjectDetailView: View {
     @AppStorage(CaptureSettings.Keys.highResolution) private var highResolution = true
     @AppStorage(CaptureSettings.Keys.depth) private var depth = true
 
+    @AppStorage(CaptureSettings.Keys.mode) private var modeRaw = CaptureMode.turntable.rawValue
+    @AppStorage(CaptureSettings.Keys.voice) private var voice = true
     @State private var captureController: CaptureController?
+    @State private var turntableController: TurntableCaptureController?
     @State private var confirmReshoot = false
     @State private var confirmDelete = false
     @State private var exportItem: ExportItem?
@@ -52,9 +55,22 @@ struct ObjectDetailView: View {
                     Label(meta.counts.images > 0 ? "重拍（会删除现有 \(meta.counts.images) 张）" : "开始拍摄",
                           systemImage: "camera.viewfinder")
                 }
-                Picker("拍摄张数", selection: $planPreset) {
-                    ForEach(CapturePlan.Preset.allCases) { p in Text(CaptureStrings.presetLabel(p)).tag(p.rawValue) }
+                Picker("拍摄方式", selection: $modeRaw) {
+                    Text("转物体（桌面小物件）").tag(CaptureMode.turntable.rawValue)
+                    Text("绕拍（大物件）").tag(CaptureMode.orbit.rawValue)
                 }
+                .pickerStyle(.inline)
+                Text(modeRaw == CaptureMode.orbit.rawValue
+                     ? "人绕着物体走一圈，适合放不上转盘的大物件。"
+                     : "人坐着不动，手机对准物体，用手或转盘转物体。手机背面朝不朝向你都行，倒拿也可以。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("拍摄张数", selection: $planPreset) {
+                    ForEach(CapturePlan.Preset.allCases) { p in
+                        Text(modeRaw == CaptureMode.orbit.rawValue ? CaptureStrings.presetLabel(p) : CaptureStrings.turntablePresetLabel(p))
+                            .tag(p.rawValue)
+                    }
+                }
+                Toggle("语音提示（看不到屏幕时用）", isOn: $voice)
                 Picker("图片格式", selection: $imageFormatRaw) {
                     ForEach(ImageFormat.allCases) { f in Text(f.label).tag(f.rawValue) }
                 }
@@ -86,6 +102,9 @@ struct ObjectDetailView: View {
         .fullScreenCover(item: $captureController, onDismiss: { store.reload() }) { controller in
             CaptureView(controller: controller)
         }
+        .fullScreenCover(item: $turntableController, onDismiss: { store.reload() }) { controller in
+            TurntableCaptureView(controller: controller)
+        }
         .sheet(item: $exportItem) { item in
             ActivityView(items: [item.url])
         }
@@ -109,9 +128,17 @@ struct ObjectDetailView: View {
     }
 
     private func startCapture(_ meta: AssetMeta) {
-        let controller = CaptureController(meta: meta, layout: store.layout(for: meta), settings: .load())
-        controller.onMetaChanged = { [store] updated in store.update(updated) }
-        captureController = controller
+        let settings = CaptureSettings.load()
+        switch settings.mode {
+        case .turntable:
+            let controller = TurntableCaptureController(meta: meta, layout: store.layout(for: meta), settings: settings)
+            controller.onMetaChanged = { [store] updated in store.update(updated) }
+            turntableController = controller
+        case .orbit:
+            let controller = CaptureController(meta: meta, layout: store.layout(for: meta), settings: settings)
+            controller.onMetaChanged = { [store] updated in store.update(updated) }
+            captureController = controller
+        }
     }
 
     private func export(_ meta: AssetMeta) {

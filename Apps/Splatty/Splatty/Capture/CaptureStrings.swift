@@ -41,6 +41,10 @@ enum CaptureStrings {
         return "\(presetName(p))（约 \(plan.targetShots()) 张）"
     }
 
+    static func turntablePresetLabel(_ p: CapturePlan.Preset) -> String {
+        "\(presetName(p))（约 \(TurntablePlan.preset(p).targetShots()) 张）"
+    }
+
     static func warning(_ w: CaptureWarning) -> String {
         switch w {
         case .trackingLimited(let reason): trackingReason(reason)

@@ -69,6 +69,15 @@ final class TurntablePlanTests: XCTestCase {
         XCTAssertEqual(c.activeRing(skipping: []), nil)
     }
 
+    func testRemoveUndoesRecord() {
+        var c = TurntableCoverage(plan: .standard)
+        let b = c.record(.eye, progressDegrees: 40)
+        XCTAssertTrue(c.isCovered(.eye, bin: b))
+        c.remove(.eye, bin: b)
+        XCTAssertFalse(c.isCovered(.eye, bin: b))
+        c.remove(.eye, bin: 99)
+    }
+
     func testSkippingRing() {
         let c = TurntableCoverage(plan: .standard)
         XCTAssertEqual(c.activeRing(skipping: [.eye]), .high)
@@ -184,6 +193,10 @@ final class RotationTrackerTests: XCTestCase {
         out = t.ingest(.init(shift: Vec2(20, 0), axis: Vec2(1, 0), radiusPixels: 300, timestamp: 0.2, phoneSteady: false))
         XCTAssertFalse(out.accepted)
         XCTAssertEqual(t.signedDegrees, 0)
+        for i in 0..<20 {
+            _ = t.ingest(.init(shift: Vec2(9, 0), axis: Vec2(1, 0), radiusPixels: 300, timestamp: 0.25 + Double(i) * 0.001, phoneSteady: false))
+        }
+        XCTAssertTrue(t.isReliable, "moving the phone (raising it) is not an estimator failure")
         for i in 0..<10 { _ = t.ingest(.init(shift: nil, axis: Vec2(1, 0), radiusPixels: 300, timestamp: 0.3 + Double(i) * 0.1)) }
         XCTAssertFalse(t.isReliable)
         _ = t.ingest(.init(shift: Vec2(5, 0), axis: Vec2(1, 0), radiusPixels: 300, timestamp: 2))

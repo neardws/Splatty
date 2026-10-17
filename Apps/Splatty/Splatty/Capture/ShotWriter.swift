@@ -21,6 +21,9 @@ struct ShotPayload: @unchecked Sendable {
     let tracking: TrackingQuality
     let highResolution: Bool
     let depth: DepthSource?
+    /// Turntable mode: normalized (0–1, top-left origin) image position of the object
+    /// centre, used to pick the right subject when generating the mask.
+    var maskHint: CGPoint?
     /// ARKit feature points (world space) visible at trigger time.
     private(set) var featurePoints: [Vec3]
 
@@ -117,49 +120,70 @@ final class ShotWriter: @unchecked Sendable {
     private let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
     /// Seed points; only touched on `queue`.
     private var cloud = PointCloudAccumulator()
+    let mode: CaptureMode
 
-    init(layout: AssetLayout, format: ImageFormat, quality: Double) {
+    init(layout: AssetLayout, format: ImageFormat, quality: Double, mode: CaptureMode = .orbit) {
         self.layout = layout
         self.format = format
         self.quality = quality
+        self.mode = mode
     }
 
     func prepareDirectories() throws {
         let fm = FileManager.default
-        for dir in [layout.raw, layout.depth, layout.arkit] {
+        let dirs = mode == .turntable ? [layout.raw, layout.depth, layout.masks] : [layout.raw, layout.depth, layout.arkit]
+        for dir in dirs {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
     }
 
     func write(_ p: ShotPayload, completion: @escaping @Sendable (Result<FrameRecord, Error>) -> Void) {
         queue.async { [self] in
-            completion(Result { try writeSync(p) })
+            completion(Result { try writeSync(p).0 })
         }
     }
 
-    /// Writes transforms.json, arkit/points3D.ply and meta.json (in that order).
-    func persist(frames: [FrameRecord], anchor: Vec3?, meta: AssetMeta, completion: @escaping @Sendable (Error?) -> Void) {
+    /// Writes arkit/points3D.ply (orbit only), transforms.json, meta.json and capture_log.json.
+    /// Each file has its own try/catch: one failing file (e.g. a NaN in transforms.json, which
+    /// is what lost the 2026-10-17 pilot's metadata) must not stop the others.
+    func persist(frames: [FrameRecord], anchor: Vec3?, meta: AssetMeta, log: CaptureLog?,
+                 completion: @escaping @Sendable (Error?) -> Void) {
         queue.async { [self] in
+            var firstError: Error?
+            var log = log
+            func note(_ what: String, _ error: Error) {
+                if firstError == nil { firstError = ShotWriteError(message: "\(what): \(error.localizedDescription)") }
+                log?.add("error", "\(what): \(error)", t: -1)
+            }
+            let hasPoints = mode == .orbit && cloud.count > 0
+            if hasPoints {
+                do { try PLYWriter.binary(cloud.points).write(to: layout.points, options: .atomic) } catch { note("points3D.ply", error) }
+            }
             do {
-                let hasPoints = cloud.count > 0
-                if hasPoints {
-                    try PLYWriter.binary(cloud.points).write(to: layout.points, options: .atomic)
-                }
-                if let doc = TransformsDocument.make(frames: frames, objectAnchor: anchor,
-                                                     plyFilePath: hasPoints ? AssetLayout.relativePointsPath : nil) {
+                if let doc = TransformsDocument.make(frames: frames, objectAnchor: mode == .orbit ? anchor : nil,
+                                                     plyFilePath: hasPoints ? AssetLayout.relativePointsPath : nil,
+                                                     captureMode: mode, maskSource: MaskInfo.visionPreliminary) {
                     try doc.jsonData().write(to: layout.transforms, options: .atomic)
                 }
-                try meta.jsonData().write(to: layout.meta, options: .atomic)
-                completion(nil)
-            } catch {
-                completion(error)
+            } catch { note("transforms.json", error) }
+            do { try meta.jsonData().write(to: layout.meta, options: .atomic) } catch { note("meta.json", error) }
+            if let log {
+                do { try log.jsonData().write(to: layout.log, options: .atomic) } catch { firstError = firstError ?? error }
             }
+            completion(firstError)
         }
     }
 
     // MARK: - Sync work (writer queue)
 
-    private func writeSync(_ p: ShotPayload) throws -> FrameRecord {
+    /// Turntable: also returns the subject box of the saved mask (normalized, top-left origin).
+    func writeWithMask(_ p: ShotPayload, completion: @escaping @Sendable (Result<(FrameRecord, CGRect?), Error>) -> Void) {
+        queue.async { [self] in
+            completion(Result { try writeSync(p) })
+        }
+    }
+
+    private func writeSync(_ p: ShotPayload) throws -> (FrameRecord, CGRect?) {
         let image = CIImage(cvPixelBuffer: p.image)
         let data: Data?
         let opts: [CIImageRepresentationOption: Any] = [
@@ -176,29 +200,54 @@ final class ShotWriter: @unchecked Sendable {
         var confPath: String?
         if let d = p.depth {
             let (w, h, meters) = try Self.readDepth(d.depth)
-            try Self.writeDepthPNG(meters: meters, width: w, height: h, to: layout.depthURL(index: p.index))
-            depthPath = AssetLayout.relativeDepthPath(index: p.index)
-            var conf: [UInt8]?
-            if let c = d.confidence {
-                let (cw, ch, bytes) = try Self.readConfidence(c)
-                try Self.writeConfidencePNG(bytes: bytes, width: cw, height: ch, to: layout.confidenceURL(index: p.index))
-                confPath = AssetLayout.relativeConfidencePath(index: p.index)
-                conf = (cw == w && ch == h) ? bytes : nil
-            }
-            let samples = DepthSampler.samples(depth: meters, confidence: conf, width: w, height: h,
-                                               intrinsics: d.intrinsics, cameraToWorld: d.pose)
-            let colors = Self.sampleColors(p.image, at: samples.map { ($0.u, $0.v) }, sourceWidth: w, sourceHeight: h)
-            for (s, c) in zip(samples, colors) {
-                cloud.add(ColoredPoint(s.world, r: c.0, g: c.1, b: c.2))
+            if mode == .turntable {
+                // Depth is camera-relative and still valid per frame; the world-space seed
+                // cloud is not (the object turns), so we skip it.
+                try Self.writeDepthPNG(meters: meters, width: w, height: h, to: layout.depthURL(index: p.index))
+                depthPath = AssetLayout.relativeDepthPath(index: p.index)
+                if let c = d.confidence {
+                    let (cw, ch, bytes) = try Self.readConfidence(c)
+                    try Self.writeConfidencePNG(bytes: bytes, width: cw, height: ch, to: layout.confidenceURL(index: p.index))
+                    confPath = AssetLayout.relativeConfidencePath(index: p.index)
+                }
+            } else {
+                try Self.writeDepthPNG(meters: meters, width: w, height: h, to: layout.depthURL(index: p.index))
+                depthPath = AssetLayout.relativeDepthPath(index: p.index)
+                var conf: [UInt8]?
+                if let c = d.confidence {
+                    let (cw, ch, bytes) = try Self.readConfidence(c)
+                    try Self.writeConfidencePNG(bytes: bytes, width: cw, height: ch, to: layout.confidenceURL(index: p.index))
+                    confPath = AssetLayout.relativeConfidencePath(index: p.index)
+                    conf = (cw == w && ch == h) ? bytes : nil
+                }
+                let samples = DepthSampler.samples(depth: meters, confidence: conf, width: w, height: h,
+                                                   intrinsics: d.intrinsics, cameraToWorld: d.pose)
+                let colors = Self.sampleColors(p.image, at: samples.map { ($0.u, $0.v) }, sourceWidth: w, sourceHeight: h)
+                for (s, c) in zip(samples, colors) {
+                    cloud.add(ColoredPoint(s.world, r: c.0, g: c.1, b: c.2))
+                }
             }
         }
-        for fp in p.featurePoints { cloud.add(ColoredPoint(fp)) }
+        if mode == .orbit {
+            for fp in p.featurePoints { cloud.add(ColoredPoint(fp)) }
+        }
+
+        // Turntable: foreground mask in COLMAP naming. A failed mask never fails the shot.
+        var maskPath: String?
+        var maskBox: CGRect?
+        if mode == .turntable {
+            let url = layout.maskURL(index: p.index, imageExt: format.fileExtension)
+            if let result = try? SubjectMasker.writeMask(for: p.image, hint: p.maskHint, to: url, context: context) {
+                maskPath = AssetLayout.relativeMaskPath(index: p.index, imageExt: format.fileExtension)
+                maskBox = result
+            }
+        }
 
         if !FileManager.default.fileExists(atPath: layout.cover.path) {
             writeCover(image)
         }
 
-        return FrameRecord(
+        var record = FrameRecord(
             index: p.index,
             filePath: AssetLayout.relativeImagePath(index: p.index, ext: format.fileExtension),
             depthFilePath: depthPath,
@@ -215,6 +264,9 @@ final class ShotWriter: @unchecked Sendable {
             highResolution: p.highResolution,
             depthTimestamp: p.depth?.timestamp
         )
+        record.poseValid = mode.arkitPosesAreObjectPoses
+        record.maskFilePath = maskPath
+        return (record, maskBox)
     }
 
     /// Portrait-rotated ~480 px cover for the library list.
