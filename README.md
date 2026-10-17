@@ -29,7 +29,7 @@ On-device **training** is intentionally out of MVP scope (viewing on device is i
 ## Repo layout
 
 ```text
-Apps/Splatty/     iOS app (placeholder)
+Apps/Splatty/     iOS app (capture MVP; XcodeGen project + SplattyCore package)
 Mac/train/        Mac mini training notes & scripts
 docs/             architecture & capture notes
 ```

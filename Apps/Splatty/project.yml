@@ -1,0 +1,60 @@
+# XcodeGen spec. Run `xcodegen generate` in this folder to produce Splatty.xcodeproj
+# (the .xcodeproj is git-ignored; this file is the source of truth).
+# Checked with XcodeGen 2.44.1 (uses a local-package test target in the scheme).
+name: Splatty
+options:
+  bundleIdPrefix: com.neardws
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+packages:
+  # Pure capture logic (pose math, coverage, transforms.json, naming...).
+  # Also testable standalone: `cd SplattyCore && swift test`.
+  SplattyCore:
+    path: SplattyCore
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    # Same team as MacShot / Octoshot on this Mac mini.
+    DEVELOPMENT_TEAM: YNQ2233752
+
+targets:
+  Splatty:
+    type: application
+    platform: iOS
+    sources:
+      - path: Splatty
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.neardws.splatty
+        PRODUCT_NAME: Splatty
+        INFOPLIST_FILE: Splatty/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+    dependencies:
+      - package: SplattyCore
+
+schemes:
+  Splatty:
+    build:
+      targets:
+        Splatty: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - package: SplattyCore/SplattyCoreTests
