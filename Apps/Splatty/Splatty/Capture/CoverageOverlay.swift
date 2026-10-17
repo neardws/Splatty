@@ -1,36 +1,45 @@
 import SplattyCore
 import SwiftUI
 
-/// Three concentric rings (outer = low, inner = high), one arc per azimuth bin.
-/// Green = has a shot, grey = missing, white = where the camera is now.
+/// 2D dial: three concentric rings (outer = low, inner = high), one arc per azimuth bin.
+/// Green = covered, grey = needed, yellow = next target, white = where you are now.
+/// The active ring is drawn thicker; other rings are dimmed.
 struct CoverageRingsView: View {
     let coverage: CoverageMap
-    let current: (ring: ElevationRing, bin: Int)?
+    let current: CoverageCell?
+    let activeRing: ElevationRing?
+    let targetBin: Int?
+    let skipped: Set<ElevationRing>
 
     var body: some View {
         Canvas { ctx, size in
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let maxR = min(size.width, size.height) / 2 - 6
-            let lineWidth = maxR * 0.2
-            let bins = coverage.binsPerRing
+            let maxR = min(size.width, size.height) / 2 - 4
+            let band = maxR / 3.4
             for ring in ElevationRing.allCases {
+                let isActive = ring == activeRing
+                let lineWidth = band * (isActive ? 0.8 : 0.5)
                 // low → outer
-                let radius = maxR - CGFloat(ring.rawValue) * (lineWidth + 4) - lineWidth / 2
+                let radius = maxR - CGFloat(ring.rawValue) * band - band * 0.4
+                let bins = coverage.bins(ring)
+                let gap = min(2.0, 120.0 / Double(bins) * 0.2)
                 for bin in 0..<bins {
-                    let a0 = Double(bin) / Double(bins) * 360 + 1.5
-                    let a1 = Double(bin + 1) / Double(bins) * 360 - 1.5
+                    let a0 = Double(bin) / Double(bins) * 360 + gap
+                    let a1 = Double(bin + 1) / Double(bins) * 360 - gap
                     let path = Self.arc(center: center, radius: radius, from: a0, to: a1)
                     let isCurrent = current.map { $0.ring == ring && $0.bin == bin } ?? false
-                    let color: Color = isCurrent ? .white
-                        : coverage.isCovered(ring, bin: bin) ? .green : .gray.opacity(0.45)
+                    var color: Color
+                    if isCurrent { color = .white }
+                    else if coverage.isCovered(ring, bin: bin) { color = .green }
+                    else if isActive && bin == targetBin { color = .yellow }
+                    else { color = .gray.opacity(0.5) }
+                    if !isActive && !isCurrent { color = color.opacity(skipped.contains(ring) ? 0.15 : 0.55) }
                     ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
                 }
             }
         }
-        .accessibilityLabel("Coverage: low \(pct(.low)), mid \(pct(.mid)), high \(pct(.high))")
+        .accessibilityLabel("覆盖进度")
     }
-
-    private func pct(_ r: ElevationRing) -> String { "\(Int((coverage.fraction(r) * 100).rounded()))%" }
 
     /// Polyline arc; 0° is up, angles increase clockwise on screen.
     static func arc(center: CGPoint, radius: CGFloat, from a0: Double, to a1: Double) -> Path {
@@ -46,19 +55,26 @@ struct CoverageRingsView: View {
     }
 }
 
-struct CoverageLegend: View {
-    let coverage: CoverageMap
+/// Three little progress rows: 中位 12/22 ✓ …
+struct RingProgressList: View {
+    let progress: [RingProgress]
+    let active: ElevationRing?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(ElevationRing.allCases.reversed()), id: \.self) { ring in
-                HStack(spacing: 4) {
-                    Text(ring.label).frame(width: 34, alignment: .leading)
-                    ProgressView(value: coverage.fraction(ring)).frame(width: 60)
-                    Text("\(Int((coverage.fraction(ring) * 100).rounded()))%").monospacedDigit()
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(progress.enumerated()), id: \.offset) { i, p in
+                HStack(spacing: 6) {
+                    Image(systemName: p.skipped ? "forward.circle" : p.isComplete ? "checkmark.circle.fill" : (p.ring == active ? "circle.dotted" : "circle"))
+                        .foregroundStyle(p.isComplete && !p.skipped ? .green : .white)
+                    Text("\(i + 1). \(CaptureStrings.ringName(p.ring))")
+                        .fontWeight(p.ring == active ? .bold : .regular)
+                    Spacer(minLength: 4)
+                    Text(p.skipped ? "跳过" : "\(min(p.covered, p.required))/\(p.required)")
+                        .monospacedDigit()
                 }
             }
         }
-        .font(.caption2)
+        .font(.caption)
+        .frame(width: 118)
     }
 }

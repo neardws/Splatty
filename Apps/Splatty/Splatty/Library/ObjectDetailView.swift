@@ -6,7 +6,7 @@ struct ObjectDetailView: View {
     @Environment(AssetStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(CaptureSettings.Keys.targetShots) private var targetShots = 120
+    @AppStorage(CaptureSettings.Keys.planPreset) private var planPreset = CapturePlan.Preset.standard.rawValue
     @AppStorage(CaptureSettings.Keys.imageFormat) private var imageFormatRaw = ImageFormat.jpeg.rawValue
     @AppStorage(CaptureSettings.Keys.highResolution) private var highResolution = true
     @AppStorage(CaptureSettings.Keys.depth) private var depth = true
@@ -22,7 +22,7 @@ struct ObjectDetailView: View {
         if let meta = store.asset(id: assetID) {
             content(meta)
         } else {
-            ContentUnavailableView("Object not found", systemImage: "questionmark.folder")
+            ContentUnavailableView("找不到这个物体", systemImage: "questionmark.folder")
         }
     }
 
@@ -35,46 +35,48 @@ struct ObjectDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .listRowInsets(EdgeInsets())
             }
-            Section("Info") {
-                LabeledContent("Category", value: meta.category.label)
-                LabeledContent("Status") { StatusBadge(status: meta.status) }
-                LabeledContent("Views", value: "\(meta.counts.images)")
-                LabeledContent("Depth maps", value: "\(meta.counts.depth)")
-                LabeledContent("Created", value: meta.createdAt)
-                if let c = meta.capturedAt { LabeledContent("Last shot", value: c) }
-                if let d = meta.device { LabeledContent("Device", value: "\(d.identifier) · iOS \(d.systemVersion)") }
-                LabeledContent("Folder") { Text(meta.folder).font(.caption.monospaced()).textSelection(.enabled) }
+            Section("信息") {
+                LabeledContent("类别", value: meta.category.label)
+                LabeledContent("状态") { StatusBadge(status: meta.status) }
+                LabeledContent("照片", value: "\(meta.counts.images)")
+                LabeledContent("深度图", value: "\(meta.counts.depth)")
+                LabeledContent("创建时间", value: meta.createdAt)
+                if let c = meta.capturedAt { LabeledContent("最后拍摄", value: c) }
+                if let d = meta.device { LabeledContent("设备", value: "\(d.identifier) · iOS \(d.systemVersion)") }
+                LabeledContent("文件夹") { Text(meta.folder).font(.caption.monospaced()).textSelection(.enabled) }
             }
-            Section("Capture") {
+            Section("拍摄") {
                 Button {
                     if meta.counts.images > 0 { confirmReshoot = true } else { startCapture(meta) }
                 } label: {
-                    Label(meta.counts.images > 0 ? "Re-shoot (clears \(meta.counts.images) views)" : "Start capture",
+                    Label(meta.counts.images > 0 ? "重拍（会删除现有 \(meta.counts.images) 张）" : "开始拍摄",
                           systemImage: "camera.viewfinder")
                 }
-                Stepper("Target views: \(targetShots)", value: $targetShots, in: 40...300, step: 10)
-                Picker("Image format", selection: $imageFormatRaw) {
+                Picker("拍摄张数", selection: $planPreset) {
+                    ForEach(CapturePlan.Preset.allCases) { p in Text(CaptureStrings.presetLabel(p)).tag(p.rawValue) }
+                }
+                Picker("图片格式", selection: $imageFormatRaw) {
                     ForEach(ImageFormat.allCases) { f in Text(f.label).tag(f.rawValue) }
                 }
-                Toggle("High-res stills (captureHighResolutionFrame)", isOn: $highResolution)
-                Toggle("Save LiDAR depth when available", isOn: $depth)
+                Toggle("高清照片", isOn: $highResolution)
+                Toggle("保存 LiDAR 深度（如果有）", isOn: $depth)
             }
-            Section("Export") {
+            Section("导出") {
                 Button {
                     export(meta)
                 } label: {
                     if exporting {
-                        HStack { ProgressView(); Text("Zipping…") }
+                        HStack { ProgressView(); Text("正在打包…") }
                     } else {
-                        Label("Share .zip (AirDrop to Mac mini)", systemImage: "square.and.arrow.up")
+                        Label("分享 .zip（隔空投送到 Mac mini）", systemImage: "square.and.arrow.up")
                     }
                 }
                 .disabled(exporting || meta.counts.images == 0)
-                Text("Also visible in Files → On My iPhone → Splatty → Splatty.")
+                Text("也可以在「文件」App → 我的 iPhone → Splatty 里找到。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                Button("Delete object", role: .destructive) { confirmDelete = true }
+                Button("删除这个物体", role: .destructive) { confirmDelete = true }
             }
             if let errorMessage {
                 Section { Text(errorMessage).foregroundStyle(.red).font(.caption) }
@@ -87,9 +89,9 @@ struct ObjectDetailView: View {
         .sheet(item: $exportItem) { item in
             ActivityView(items: [item.url])
         }
-        .confirmationDialog("Re-shoot deletes the existing \(meta.counts.images) views.", isPresented: $confirmReshoot,
+        .confirmationDialog("重拍会删除现有的 \(meta.counts.images) 张照片。", isPresented: $confirmReshoot,
                             titleVisibility: .visible) {
-            Button("Delete views and re-shoot", role: .destructive) {
+            Button("删除并重拍", role: .destructive) {
                 do {
                     let cleared = try store.clearShots(meta)
                     startCapture(cleared)
@@ -98,8 +100,8 @@ struct ObjectDetailView: View {
                 }
             }
         }
-        .confirmationDialog("Delete \(meta.name) and all its files?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog("删除「\(meta.name)」和它的所有文件？", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("删除", role: .destructive) {
                 store.delete(meta)
                 dismiss()
             }
@@ -121,7 +123,7 @@ struct ObjectDetailView: View {
                 let url = try await Exporter.zip(folder: folder)
                 exportItem = ExportItem(url: url)
             } catch {
-                errorMessage = "Export failed: \(error.localizedDescription)"
+                errorMessage = "导出失败：\(error.localizedDescription)"
             }
             exporting = false
         }

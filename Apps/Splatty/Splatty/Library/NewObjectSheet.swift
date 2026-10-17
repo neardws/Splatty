@@ -10,29 +10,29 @@ struct NewObjectSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Name") {
-                    TextField("e.g. Pikachu Gold / 皮卡丘", text: $name)
+                Section("名字") {
+                    TextField("例如：皮卡丘 / Pikachu Gold", text: $name)
                         .textInputAutocapitalization(.words)
                 }
-                Section("Category") {
-                    Picker("Category", selection: $category) {
+                Section("类别") {
+                    Picker("类别", selection: $category) {
                         ForEach(AssetCategory.allCases) { c in Text(c.label).tag(c) }
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
                 }
                 Section {
-                    Text("Folder: \(AssetNaming.folderName(date: Date(), timeZone: .current, name: name.isEmpty ? category.rawValue : name, category: category, shortID: "xxxxxx"))")
+                    Text("文件夹：\(AssetNaming.folderName(date: Date(), timeZone: .current, name: name.isEmpty ? category.rawValue : name, category: category, shortID: "xxxxxx"))")
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("New Object")
+            .navigationTitle("新建物体")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button("创建") {
                         onCreate(name, category)
                         dismiss()
                     }

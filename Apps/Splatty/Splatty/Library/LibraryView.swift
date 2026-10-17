@@ -13,11 +13,11 @@ struct LibraryView: View {
             Group {
                 if store.assets.isEmpty {
                     ContentUnavailableView {
-                        Label("No objects yet", systemImage: "cube.transparent")
+                        Label("还没有物体", systemImage: "cube.transparent")
                     } description: {
-                        Text("Create an object, then walk around it to capture 80–200 views.")
+                        Text("新建一个物体，然后跟着提示绕它走一圈，大约 40 多张照片。")
                     } actions: {
-                        Button("New Object") { showingNew = true }.buttonStyle(.borderedProminent)
+                        Button("新建物体") { showingNew = true }.buttonStyle(.borderedProminent)
                     }
                 } else {
                     List {
@@ -27,7 +27,7 @@ struct LibraryView: View {
                             }
                             .swipeActions {
                                 Button(role: .destructive) { pendingDelete = meta } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    Label("删除", systemImage: "trash")
                                 }
                             }
                         }
@@ -38,7 +38,7 @@ struct LibraryView: View {
             .navigationTitle("Splatty")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button { showingNew = true } label: { Label("New Object", systemImage: "plus") }
+                    Button { showingNew = true } label: { Label("新建物体", systemImage: "plus") }
                 }
             }
             .navigationDestination(for: String.self) { id in
@@ -55,11 +55,11 @@ struct LibraryView: View {
                 }
             }
             .confirmationDialog(
-                "Delete \(pendingDelete?.name ?? "")?",
+                "删除「\(pendingDelete?.name ?? "")」？",
                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                 titleVisibility: .visible
             ) {
-                Button("Delete object and all shots", role: .destructive) {
+                Button("删除物体和全部照片", role: .destructive) {
                     if let m = pendingDelete { store.delete(m) }
                     pendingDelete = nil
                 }
@@ -82,7 +82,7 @@ struct AssetRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(meta.name).font(.headline)
                 Text(meta.category.label).font(.caption).foregroundStyle(.secondary)
-                Text("\(meta.counts.images) views" + (meta.counts.depth > 0 ? " · \(meta.counts.depth) depth" : ""))
+                Text("\(meta.counts.images) 张" + (meta.counts.depth > 0 ? " · \(meta.counts.depth) 深度" : ""))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -111,11 +111,21 @@ struct StatusBadge: View {
     let status: AssetStatus
 
     var body: some View {
-        Text(status.rawValue)
+        Text(label)
             .font(.caption2.bold())
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.2), in: Capsule())
             .foregroundStyle(color)
+    }
+
+    private var label: String {
+        switch status {
+        case .draft: "未拍"
+        case .captured: "已拍"
+        case .processing: "训练中"
+        case .ready: "完成"
+        case .failed: "失败"
+        }
     }
 
     private var color: Color {

@@ -2,13 +2,8 @@ import XCTest
 @testable import SplattyCore
 
 final class CoverageTests: XCTestCase {
-    /// Camera on a circle of `radius` at azimuth/elevation (deg), looking at the origin.
     func lookAtPose(azimuth: Double, elevation: Double, radius: Double = 0.3) -> Mat4 {
-        let az = azimuth * .pi / 180, el = elevation * .pi / 180
-        // Camera +Z (back) points from the anchor to the camera.
-        let r = Mat4.matmul3(Mat4.rotationY(az), Mat4.rotationX(-el))
-        let back = Vec3(r[0][2], r[1][2], r[2][2])
-        return Mat4.rigid(rotation: r, translation: back * radius)
+        orbitPose(azimuth: azimuth, elevation: elevation, radius: radius)
     }
 
     func testViewpointMath() {
@@ -57,5 +52,20 @@ final class CoverageTests: XCTestCase {
         let away = Mat4.rigid(rotation: Mat4.rotationY(.pi), translation: Vec3(0, 0, 0.3))
         XCTAssertNil(map.record(cameraToWorld: away, anchor: .zero))
         XCTAssertEqual(map.overallFraction, 0)
+    }
+}
+
+final class PerRingBinTests: XCTestCase {
+    func testPlanShapedMap() {
+        var map = CoverageMap(plan: .standard)
+        XCTAssertEqual(map.bins(.mid), 24)
+        XCTAssertEqual(map.bins(.low), 12)
+        XCTAssertEqual(map.binWidth(.high), 30)
+        XCTAssertEqual(map.binCenter(.mid, bin: 0), 7.5)
+        // 20° azimuth: mid bin 1 (15°), high bin 0 (30°)
+        XCTAssertEqual(map.record(cameraToWorld: orbitPose(azimuth: 20, elevation: 25), anchor: .zero)?.bin, 1)
+        XCTAssertEqual(map.record(cameraToWorld: orbitPose(azimuth: 20, elevation: 60), anchor: .zero)?.bin, 0)
+        XCTAssertEqual(map.coveredCount(.mid), 1)
+        XCTAssertEqual(map.fraction(.high), 1.0 / 12, accuracy: 1e-12)
     }
 }

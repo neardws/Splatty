@@ -1,23 +1,25 @@
 import Foundation
+import SplattyCore
 
 enum ImageFormat: String, CaseIterable, Identifiable, Sendable {
     case jpeg, heic
     var id: String { rawValue }
     var fileExtension: String { self == .jpeg ? "jpg" : "heic" }
-    var label: String { self == .jpeg ? "JPEG (max compatibility)" : "HEIC (smaller)" }
+    var label: String { self == .jpeg ? "JPEG（兼容性最好）" : "HEIC（更小）" }
 }
 
 /// User-tunable capture settings (persisted with @AppStorage under these keys).
 struct CaptureSettings: Sendable, Equatable {
     enum Keys {
-        static let targetShots = "capture.targetShots"
+        static let planPreset = "capture.planPreset"
         static let imageFormat = "capture.imageFormat"
         static let highResolution = "capture.highResolution"
         static let depth = "capture.depth"
         static let jpegQuality = "capture.jpegQuality"
     }
 
-    var targetShots: Int = 120
+    var planPreset: CapturePlan.Preset = .standard
+    var plan: CapturePlan { CapturePlan.preset(planPreset) }
     var imageFormat: ImageFormat = .jpeg
     var highResolution: Bool = true
     var depthEnabled: Bool = true
@@ -25,7 +27,7 @@ struct CaptureSettings: Sendable, Equatable {
 
     static func load(_ d: UserDefaults = .standard) -> CaptureSettings {
         var s = CaptureSettings()
-        if d.object(forKey: Keys.targetShots) != nil { s.targetShots = max(10, d.integer(forKey: Keys.targetShots)) }
+        if let p = d.string(forKey: Keys.planPreset), let preset = CapturePlan.Preset(rawValue: p) { s.planPreset = preset }
         if let f = d.string(forKey: Keys.imageFormat), let fmt = ImageFormat(rawValue: f) { s.imageFormat = fmt }
         if d.object(forKey: Keys.highResolution) != nil { s.highResolution = d.bool(forKey: Keys.highResolution) }
         if d.object(forKey: Keys.depth) != nil { s.depthEnabled = d.bool(forKey: Keys.depth) }

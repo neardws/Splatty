@@ -43,9 +43,10 @@ public struct Viewpoint: Equatable, Sendable {
     }
 }
 
-/// Coverage histogram: 3 elevation rings × N azimuth bins.
+/// Coverage histogram: 3 elevation rings, each with its own number of azimuth bins.
 public struct CoverageMap: Equatable, Sendable {
-    public let binsPerRing: Int
+    /// Azimuth bins per ring, indexed by `ElevationRing.rawValue`.
+    public let binCounts: [Int]
     /// Upper elevation bound (degrees, exclusive) of the low ring.
     public let lowMaxElevation: Double
     /// Upper elevation bound (degrees, exclusive) of the mid ring.
@@ -54,19 +55,40 @@ public struct CoverageMap: Equatable, Sendable {
     public let maxOffAxisDegrees: Double
     public private(set) var counts: [[Int]]
 
+    /// Same number of bins on every ring.
     public init(
         binsPerRing: Int = 24,
         lowMaxElevation: Double = 15,
         midMaxElevation: Double = 40,
         maxOffAxisDegrees: Double = 35
     ) {
-        precondition(binsPerRing > 0)
-        self.binsPerRing = binsPerRing
+        self.init(binCounts: [binsPerRing, binsPerRing, binsPerRing], lowMaxElevation: lowMaxElevation,
+                  midMaxElevation: midMaxElevation, maxOffAxisDegrees: maxOffAxisDegrees)
+    }
+
+    public init(binCounts: [Int], lowMaxElevation: Double = 15, midMaxElevation: Double = 40, maxOffAxisDegrees: Double = 35) {
+        precondition(binCounts.count == ElevationRing.allCases.count && binCounts.allSatisfy { $0 > 0 })
+        self.binCounts = binCounts
         self.lowMaxElevation = lowMaxElevation
         self.midMaxElevation = midMaxElevation
         self.maxOffAxisDegrees = maxOffAxisDegrees
-        counts = Array(repeating: Array(repeating: 0, count: binsPerRing), count: ElevationRing.allCases.count)
+        counts = binCounts.map { Array(repeating: 0, count: $0) }
     }
+
+    /// Coverage map shaped by a capture plan.
+    public init(plan: CapturePlan) {
+        self.init(binCounts: ElevationRing.allCases.map { plan.spec($0).bins },
+                  lowMaxElevation: plan.lowMaxElevation, midMaxElevation: plan.midMaxElevation,
+                  maxOffAxisDegrees: plan.maxOffAxisDegrees)
+    }
+
+    public func bins(_ ring: ElevationRing) -> Int { binCounts[ring.rawValue] }
+
+    /// Angular width (degrees) of one bin in `ring`.
+    public func binWidth(_ ring: ElevationRing) -> Double { 360 / Double(bins(ring)) }
+
+    /// Centre azimuth (degrees) of `bin` in `ring`.
+    public func binCenter(_ ring: ElevationRing, bin: Int) -> Double { (Double(bin) + 0.5) * binWidth(ring) }
 
     public func ring(forElevation e: Double) -> ElevationRing {
         if e < lowMaxElevation { return .low }
@@ -74,15 +96,17 @@ public struct CoverageMap: Equatable, Sendable {
         return .high
     }
 
-    public func bin(forAzimuth a: Double) -> Int {
+    public func bin(forAzimuth a: Double, ring: ElevationRing = .mid) -> Int {
+        let n = bins(ring)
         var az = a.truncatingRemainder(dividingBy: 360)
         if az < 0 { az += 360 }
-        let b = Int(az / 360 * Double(binsPerRing))
-        return min(max(b, 0), binsPerRing - 1)
+        let b = Int(az / 360 * Double(n))
+        return min(max(b, 0), n - 1)
     }
 
     public func cell(for vp: Viewpoint) -> (ring: ElevationRing, bin: Int) {
-        (ring(forElevation: vp.elevationDegrees), bin(forAzimuth: vp.azimuthDegrees))
+        let r = ring(forElevation: vp.elevationDegrees)
+        return (r, bin(forAzimuth: vp.azimuthDegrees, ring: r))
     }
 
     /// Cell for a camera pose, or nil if the camera isn't looking at the anchor.
@@ -100,15 +124,16 @@ public struct CoverageMap: Equatable, Sendable {
     }
 
     public mutating func reset() {
-        counts = Array(repeating: Array(repeating: 0, count: binsPerRing), count: ElevationRing.allCases.count)
+        counts = binCounts.map { Array(repeating: 0, count: $0) }
     }
 
     public func isCovered(_ ring: ElevationRing, bin: Int) -> Bool { counts[ring.rawValue][bin] > 0 }
 
+    public func coveredCount(_ ring: ElevationRing) -> Int { counts[ring.rawValue].filter { $0 > 0 }.count }
+
     /// Fraction of azimuth bins in `ring` with at least one shot.
     public func fraction(_ ring: ElevationRing) -> Double {
-        let row = counts[ring.rawValue]
-        return Double(row.filter { $0 > 0 }.count) / Double(binsPerRing)
+        Double(coveredCount(ring)) / Double(bins(ring))
     }
 
     /// Mean coverage over all rings.

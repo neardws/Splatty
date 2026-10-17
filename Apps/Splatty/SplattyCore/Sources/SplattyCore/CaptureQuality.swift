@@ -22,6 +22,8 @@ public enum CaptureWarning: Equatable, Hashable, Sendable {
     case tooDark
     case movingTooFast
     case notAimedAtObject
+    case tooClose
+    case tooFar
 
     public var message: String {
         switch self {
@@ -29,6 +31,8 @@ public enum CaptureWarning: Equatable, Hashable, Sendable {
         case .tooDark: "Too dark — add soft light"
         case .movingTooFast: "Moving too fast — slow down"
         case .notAimedAtObject: "Aim at the object marker"
+        case .tooClose: "Too close — step back a little"
+        case .tooFar: "Too far — move closer"
         }
     }
 }
@@ -89,6 +93,9 @@ public struct QualityThresholds: Sendable, Equatable {
     public var maxBlurPixels: Double = 4
     /// Hard angular speed cap (deg/s).
     public var maxAngularSpeed: Double = 45
+    /// Camera-to-object distance band (metres).
+    public var minDistance: Double = 0.12
+    public var maxDistance: Double = 1.0
 
     public init() {}
 }
@@ -100,6 +107,8 @@ public struct FrameQualityInput: Sendable, Equatable {
     public var estimatedBlurPixels: Double
     public var angularSpeed: Double
     public var aimedAtObject: Bool
+    /// Camera-to-anchor distance (metres), nil if unknown.
+    public var distance: Double?
 
     public init(
         tracking: TrackingQuality,
@@ -107,7 +116,8 @@ public struct FrameQualityInput: Sendable, Equatable {
         exposureDuration: Double,
         estimatedBlurPixels: Double,
         angularSpeed: Double,
-        aimedAtObject: Bool
+        aimedAtObject: Bool,
+        distance: Double? = nil
     ) {
         self.tracking = tracking
         self.ambientIntensity = ambientIntensity
@@ -115,6 +125,7 @@ public struct FrameQualityInput: Sendable, Equatable {
         self.estimatedBlurPixels = estimatedBlurPixels
         self.angularSpeed = angularSpeed
         self.aimedAtObject = aimedAtObject
+        self.distance = distance
     }
 }
 
@@ -130,6 +141,9 @@ public enum CaptureQuality {
         if darkByLight || i.exposureDuration > t.maxExposureDuration { w.append(.tooDark) }
         if i.estimatedBlurPixels > t.maxBlurPixels || i.angularSpeed > t.maxAngularSpeed { w.append(.movingTooFast) }
         if !i.aimedAtObject { w.append(.notAimedAtObject) }
+        if let d = i.distance {
+            if d < t.minDistance { w.append(.tooClose) } else if d > t.maxDistance { w.append(.tooFar) }
+        }
         return w
     }
 }
