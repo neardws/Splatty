@@ -66,29 +66,20 @@ ARKit capture itself needs a real device (the simulator has no camera / ARKit tr
 object (name + category: figure / badge / brick / toy / other); swipe or the detail page
 deletes it (with confirmation).
 
-**Capture** (object page → *Start capture*)
+**Capture** (object page → *开始拍摄*): a guided flow, see [`docs/capture-ux.md`](../../docs/capture-ux.md).
 
-- `ARWorldTrackingConfiguration`, preferring `recommendedVideoFormatForHighResolutionFrameCapturing`
-  and saving each shot via `ARSession.captureHighResolutionFrame` (falls back to the video
-  frame if that fails, or to the largest back-wide video format if hi-res isn't supported)
-- per shot: image (JPEG default, HEIC optional) in **sensor-native landscape orientation**,
-  intrinsics (scaled to the saved image size), camera-to-world pose, ARKit timestamp,
-  wall-clock time with offset, exposure duration/offset, ambient light, tracking state
-- LiDAR devices: `sceneDepth` depth (16-bit PNG, mm) + confidence (8-bit PNG, 0/1/2);
-  toggle in the capture screen, default on when supported
-- **Manual shutter** and **Auto** mode: fires when the camera moved ≥ 3 cm or turned ≥ 5°
-  since the last shot, ≥ 0.35 s apart, tracking is `normal`, the estimated motion blur is
-  under ~4 px and you're aiming at the object
-- **AE/AF lock** button: locks exposure, focus and white balance through
-  `configurableCaptureDeviceForPrimaryCamera` (frame the object first, then lock)
-- **Coverage overlay**: shot count vs target (default 120, adjustable on the object page),
-  three elevation rings (outer = low < 15°, middle = mid 15–40°, inner = high ≥ 40°) × 24
-  azimuth bins (15° each) around the object anchor; white = where you are now
-- Object anchor: a default point 30 cm in front of the camera once tracking is normal;
-  **tap the object** to set it properly (raycast onto estimated planes; yellow dot)
-- Warnings: tracking limited (with reason), too dark, moving too fast, not aimed at object
-- Seed point cloud `arkit/points3D.ply`: ARKit feature points + (LiDAR) high-confidence depth
-  samples coloured from the image. msplat initialises Gaussians from this file.
+- 3-page Chinese onboarding on first run (**?** to reopen)
+- Tap the object centre (or **就是中间这个**). Exposure + white balance lock automatically
+- 3 rings in order 中位 → 高位 → 低位. An AR ring of segments around the object (grey →
+  green, yellow = next target), a 2D dial, and a big direction pill (向左/向右慢慢绕, 抬高/放低)
+- **One auto-shot per uncovered bin**, never in covered bins. Bad frames are rejected with a
+  reason (太快 / 太暗 / 跟踪不稳 / 太近 / 太远)
+- Haptic tick per shot, success haptic + "next ring" card when a ring completes, "可以了"
+  with 完成 / 继续补拍 at the end. Rings can be skipped (… menu or the ring card)
+- Default plan **标准**: 24 + 12 + 12 bins, done at 44 photos (快速 31, 精细 65; set on the object page)
+- Per shot (unchanged): hi-res still via `captureHighResolutionFrame` (falls back to the video
+  frame), intrinsics scaled to the saved image, c2w pose, timestamps, exposure/light, tracking.
+  LiDAR depth (16-bit mm PNG) + confidence when enabled. Seed points go to `arkit/points3D.ply`
 
 **Export** — *Share .zip* zips the object folder with the system zipper
 (`NSFileCoordinator` `.forUploading`) and opens the share sheet → AirDrop to the Mac mini.
@@ -121,15 +112,15 @@ Use a matte, textured object on a textured surface, soft light. Ideally test on 
 - [ ] App installs and launches; camera permission prompt shows the bilingual text
 - [ ] Create object "Test 测试" / figure → appears in library as `draft`, 0 views; folder name
       looks like `YYYYMMDD_test-ce-shi_xxxxxx` (date in local time)
-- [ ] Start capture → preview runs; tracking goes `initializing` → `normal`; yellow dot appears
-- [ ] Tap the object → yellow dot moves onto it; coverage re-centres
-- [ ] Manual shutter → flash, count +1, no visible hitch; bottom panel shows `saved W×H`
-      (expect ~12 MP / 4032×3024-ish on recent iPhones if hi-res stills work; 1920×1440 if not)
-- [ ] Auto on, walk slowly around the object → shots fire every few degrees; stop moving → stops
-- [ ] Wave the phone fast → "Moving too fast", auto pauses; cover the lens → tracking limited / too dark
-- [ ] Coverage arcs turn green as you orbit; do low / mid / high rings, aim ≥ 80–120 shots
-- [ ] AE/AF lock toggles without errors (brightness stops adapting)
-- [ ] LiDAR phone: "depth: N" increases; toggle Depth off → new shots have no depth
+- [ ] First 开始拍摄 shows the 3 tip cards; 开始拍摄/跳过 closes them; **?** reopens
+- [ ] Placing: reticle + "轻点它的中心"; tap the object → AR ring of grey segments around it, one yellow
+- [ ] Walk slowly as the pill says (向右/向左慢慢绕) → each new segment shoots once (tick + flash), turns
+      green, and the yellow target moves on; walking back over green segments takes **no** photos
+- [ ] Move fast / cover lens / step very close or far → red reason pill, no shot
+- [ ] Mid ring done (22/24) → success haptic + "把手机抬高…" card with a bobbing arrow; raise the phone → card hides
+- [ ] High then low ring; "这圈跳过" works; final "可以了！共 ~44 张" → 完成 (or 继续补拍)
+- [ ] Bottom-right camera button still takes a manual extra shot
+- [ ] LiDAR phone: library shows "N 深度"; … menu → turn off 保存 LiDAR 深度 → new shots have no depth
 - [ ] Done → library shows cover, view count, status `captured`
 - [ ] Files app → On My iPhone → Splatty → folder contains `raw/`, `transforms.json`,
       `meta.json`, `arkit/points3D.ply` (+ `depth/` on LiDAR)
