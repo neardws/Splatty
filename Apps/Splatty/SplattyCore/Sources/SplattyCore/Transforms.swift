@@ -1,0 +1,258 @@
+import Foundation
+
+/// One captured view, serialised as a Nerfstudio `transforms.json` frame.
+///
+/// Standard Nerfstudio keys: `file_path`, `transform_matrix` (4x4 row-major,
+/// camera-to-world, OpenGL convention), optional `depth_file_path`, and
+/// per-frame intrinsics `fl_x fl_y cx cy w h` (Nerfstudio lets frames override
+/// the top-level ones). Everything else is Splatty metadata that Nerfstudio
+/// ignores.
+public struct FrameRecord: Equatable, Sendable, Codable {
+    public var index: Int
+    /// Relative to the asset root (where transforms.json lives), e.g. `raw/frame_00001.jpg`.
+    public var filePath: String
+    public var depthFilePath: String?
+    public var confidenceFilePath: String?
+    /// Camera-to-world, Nerfstudio/OpenGL convention (== ARKit camera.transform).
+    public var transform: Mat4
+    public var intrinsics: Intrinsics
+    /// ARFrame.timestamp (seconds since device boot).
+    public var timestamp: Double
+    /// Wall-clock time with timezone offset (ISO 8601).
+    public var capturedAt: String
+    public var exposureDuration: Double
+    public var exposureOffset: Double
+    public var ambientIntensity: Double?
+    public var ambientColorTemperature: Double?
+    public var tracking: String
+    public var highResolution: Bool
+    /// Timestamp of the frame the depth map came from (may differ for high-res stills).
+    public var depthTimestamp: Double?
+    /// Elevation ring / azimuth bin at capture time (nil if not aimed at anchor).
+    public var ring: Int?
+    public var azimuthBin: Int?
+
+    public init(
+        index: Int,
+        filePath: String,
+        depthFilePath: String? = nil,
+        confidenceFilePath: String? = nil,
+        transform: Mat4,
+        intrinsics: Intrinsics,
+        timestamp: Double,
+        capturedAt: String,
+        exposureDuration: Double,
+        exposureOffset: Double,
+        ambientIntensity: Double? = nil,
+        ambientColorTemperature: Double? = nil,
+        tracking: String,
+        highResolution: Bool,
+        depthTimestamp: Double? = nil,
+        ring: Int? = nil,
+        azimuthBin: Int? = nil
+    ) {
+        self.index = index
+        self.filePath = filePath
+        self.depthFilePath = depthFilePath
+        self.confidenceFilePath = confidenceFilePath
+        self.transform = transform
+        self.intrinsics = intrinsics
+        self.timestamp = timestamp
+        self.capturedAt = capturedAt
+        self.exposureDuration = exposureDuration
+        self.exposureOffset = exposureOffset
+        self.ambientIntensity = ambientIntensity
+        self.ambientColorTemperature = ambientColorTemperature
+        self.tracking = tracking
+        self.highResolution = highResolution
+        self.depthTimestamp = depthTimestamp
+        self.ring = ring
+        self.azimuthBin = azimuthBin
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case index = "splatty_index"
+        case filePath = "file_path"
+        case depthFilePath = "depth_file_path"
+        case confidenceFilePath = "confidence_file_path"
+        case transformMatrix = "transform_matrix"
+        case flX = "fl_x", flY = "fl_y", cx, cy, w, h
+        case timestamp
+        case capturedAt = "captured_at"
+        case exposureDuration = "exposure_duration"
+        case exposureOffset = "exposure_offset"
+        case ambientIntensity = "ambient_intensity"
+        case ambientColorTemperature = "ambient_color_temperature"
+        case tracking
+        case highResolution = "high_resolution"
+        case depthTimestamp = "depth_timestamp"
+        case ring
+        case azimuthBin = "azimuth_bin"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        index = try c.decode(Int.self, forKey: .index)
+        filePath = try c.decode(String.self, forKey: .filePath)
+        depthFilePath = try c.decodeIfPresent(String.self, forKey: .depthFilePath)
+        confidenceFilePath = try c.decodeIfPresent(String.self, forKey: .confidenceFilePath)
+        let rows = try c.decode([[Double]].self, forKey: .transformMatrix)
+        guard rows.count == 4, rows.allSatisfy({ $0.count == 4 }) else {
+            throw DecodingError.dataCorruptedError(forKey: .transformMatrix, in: c, debugDescription: "expected 4x4")
+        }
+        transform = Mat4(rows: rows)
+        intrinsics = Intrinsics(
+            fx: try c.decode(Double.self, forKey: .flX),
+            fy: try c.decode(Double.self, forKey: .flY),
+            cx: try c.decode(Double.self, forKey: .cx),
+            cy: try c.decode(Double.self, forKey: .cy),
+            width: try c.decode(Int.self, forKey: .w),
+            height: try c.decode(Int.self, forKey: .h)
+        )
+        timestamp = try c.decode(Double.self, forKey: .timestamp)
+        capturedAt = try c.decode(String.self, forKey: .capturedAt)
+        exposureDuration = try c.decode(Double.self, forKey: .exposureDuration)
+        exposureOffset = try c.decode(Double.self, forKey: .exposureOffset)
+        ambientIntensity = try c.decodeIfPresent(Double.self, forKey: .ambientIntensity)
+        ambientColorTemperature = try c.decodeIfPresent(Double.self, forKey: .ambientColorTemperature)
+        tracking = try c.decode(String.self, forKey: .tracking)
+        highResolution = try c.decode(Bool.self, forKey: .highResolution)
+        depthTimestamp = try c.decodeIfPresent(Double.self, forKey: .depthTimestamp)
+        ring = try c.decodeIfPresent(Int.self, forKey: .ring)
+        azimuthBin = try c.decodeIfPresent(Int.self, forKey: .azimuthBin)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(index, forKey: .index)
+        try c.encode(filePath, forKey: .filePath)
+        try c.encodeIfPresent(depthFilePath, forKey: .depthFilePath)
+        try c.encodeIfPresent(confidenceFilePath, forKey: .confidenceFilePath)
+        try c.encode(transform.m, forKey: .transformMatrix)
+        try c.encode(intrinsics.fx, forKey: .flX)
+        try c.encode(intrinsics.fy, forKey: .flY)
+        try c.encode(intrinsics.cx, forKey: .cx)
+        try c.encode(intrinsics.cy, forKey: .cy)
+        try c.encode(intrinsics.width, forKey: .w)
+        try c.encode(intrinsics.height, forKey: .h)
+        try c.encode(timestamp, forKey: .timestamp)
+        try c.encode(capturedAt, forKey: .capturedAt)
+        try c.encode(exposureDuration, forKey: .exposureDuration)
+        try c.encode(exposureOffset, forKey: .exposureOffset)
+        try c.encodeIfPresent(ambientIntensity, forKey: .ambientIntensity)
+        try c.encodeIfPresent(ambientColorTemperature, forKey: .ambientColorTemperature)
+        try c.encode(tracking, forKey: .tracking)
+        try c.encode(highResolution, forKey: .highResolution)
+        try c.encodeIfPresent(depthTimestamp, forKey: .depthTimestamp)
+        try c.encodeIfPresent(ring, forKey: .ring)
+        try c.encodeIfPresent(azimuthBin, forKey: .azimuthBin)
+    }
+}
+
+/// Nerfstudio-compatible `transforms.json` written to the asset root.
+public struct TransformsDocument: Equatable, Sendable, Codable {
+    public static let currentSplattyFormat = 1
+
+    public var cameraModel: String = "OPENCV"
+    public var intrinsics: Intrinsics
+    public var k1 = 0.0, k2 = 0.0, p1 = 0.0, p2 = 0.0
+    public var frames: [FrameRecord]
+    /// Splatty extras (ignored by Nerfstudio).
+    public var splattyFormat: Int = TransformsDocument.currentSplattyFormat
+    public var poseSource = "arkit"
+    public var cameraConvention = "opengl_c2w (ARKit camera.transform, image in sensor-native landscape orientation)"
+    public var worldConvention = "arkit_world_y_up_meters"
+    public var depthUnitScaleFactor: Double? = nil
+    public var objectAnchor: [Double]? = nil
+    /// Seed point cloud (Nerfstudio/msplat `ply_file_path`), relative to the asset root.
+    public var plyFilePath: String? = nil
+
+    public init(intrinsics: Intrinsics, frames: [FrameRecord]) {
+        self.intrinsics = intrinsics
+        self.frames = frames
+    }
+
+    /// Builds a document whose top-level intrinsics come from the first frame.
+    public static func make(frames: [FrameRecord], objectAnchor: Vec3? = nil, plyFilePath: String? = nil) -> TransformsDocument? {
+        guard let first = frames.first else { return nil }
+        var doc = TransformsDocument(intrinsics: first.intrinsics, frames: frames)
+        if frames.contains(where: { $0.depthFilePath != nil }) {
+            doc.depthUnitScaleFactor = DepthEncoding.unitScaleFactor
+        }
+        doc.objectAnchor = objectAnchor.map { [$0.x, $0.y, $0.z] }
+        doc.plyFilePath = plyFilePath
+        return doc
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case cameraModel = "camera_model"
+        case flX = "fl_x", flY = "fl_y", cx, cy, w, h
+        case k1, k2, p1, p2
+        case frames
+        case splattyFormat = "splatty_format"
+        case poseSource = "splatty_pose_source"
+        case cameraConvention = "splatty_camera_convention"
+        case worldConvention = "splatty_world_convention"
+        case depthUnitScaleFactor = "depth_unit_scale_factor"
+        case objectAnchor = "splatty_object_anchor"
+        case plyFilePath = "ply_file_path"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cameraModel = try c.decodeIfPresent(String.self, forKey: .cameraModel) ?? "OPENCV"
+        intrinsics = Intrinsics(
+            fx: try c.decode(Double.self, forKey: .flX),
+            fy: try c.decode(Double.self, forKey: .flY),
+            cx: try c.decode(Double.self, forKey: .cx),
+            cy: try c.decode(Double.self, forKey: .cy),
+            width: try c.decode(Int.self, forKey: .w),
+            height: try c.decode(Int.self, forKey: .h)
+        )
+        k1 = try c.decodeIfPresent(Double.self, forKey: .k1) ?? 0
+        k2 = try c.decodeIfPresent(Double.self, forKey: .k2) ?? 0
+        p1 = try c.decodeIfPresent(Double.self, forKey: .p1) ?? 0
+        p2 = try c.decodeIfPresent(Double.self, forKey: .p2) ?? 0
+        frames = try c.decode([FrameRecord].self, forKey: .frames)
+        splattyFormat = try c.decodeIfPresent(Int.self, forKey: .splattyFormat) ?? 1
+        poseSource = try c.decodeIfPresent(String.self, forKey: .poseSource) ?? "arkit"
+        cameraConvention = try c.decodeIfPresent(String.self, forKey: .cameraConvention) ?? ""
+        worldConvention = try c.decodeIfPresent(String.self, forKey: .worldConvention) ?? ""
+        depthUnitScaleFactor = try c.decodeIfPresent(Double.self, forKey: .depthUnitScaleFactor)
+        objectAnchor = try c.decodeIfPresent([Double].self, forKey: .objectAnchor)
+        plyFilePath = try c.decodeIfPresent(String.self, forKey: .plyFilePath)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(cameraModel, forKey: .cameraModel)
+        try c.encode(intrinsics.fx, forKey: .flX)
+        try c.encode(intrinsics.fy, forKey: .flY)
+        try c.encode(intrinsics.cx, forKey: .cx)
+        try c.encode(intrinsics.cy, forKey: .cy)
+        try c.encode(intrinsics.width, forKey: .w)
+        try c.encode(intrinsics.height, forKey: .h)
+        try c.encode(k1, forKey: .k1)
+        try c.encode(k2, forKey: .k2)
+        try c.encode(p1, forKey: .p1)
+        try c.encode(p2, forKey: .p2)
+        try c.encode(frames, forKey: .frames)
+        try c.encode(splattyFormat, forKey: .splattyFormat)
+        try c.encode(poseSource, forKey: .poseSource)
+        try c.encode(cameraConvention, forKey: .cameraConvention)
+        try c.encode(worldConvention, forKey: .worldConvention)
+        try c.encodeIfPresent(depthUnitScaleFactor, forKey: .depthUnitScaleFactor)
+        try c.encodeIfPresent(objectAnchor, forKey: .objectAnchor)
+        try c.encodeIfPresent(plyFilePath, forKey: .plyFilePath)
+    }
+
+    public func jsonData() throws -> Data {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return try enc.encode(self)
+    }
+
+    public static func decode(_ data: Data) throws -> TransformsDocument {
+        try JSONDecoder().decode(TransformsDocument.self, from: data)
+    }
+}

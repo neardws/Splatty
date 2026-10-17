@@ -28,3 +28,6 @@ __pycache__/
 # Secrets / local
 .env
 *.pem
+
+# XcodeGen output (regenerate with `xcodegen` in Apps/Splatty)
+*.xcodeproj/
