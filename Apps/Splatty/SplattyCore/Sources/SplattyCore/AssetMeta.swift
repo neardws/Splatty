@@ -56,6 +56,13 @@ public struct CaptureSettingsRecord: Codable, Sendable, Equatable {
     public var depthEnabled: Bool
     public var videoFormat: String?
     public var exposureLocked: Bool
+    /// v2 (optional so v1 files still decode).
+    public var whiteBalanceLocked: Bool?
+    public var focusLocked: Bool?
+    public var captureMode: CaptureMode?
+    /// Plan preset key (quick / standard / detailed).
+    public var preset: String?
+    public var voicePrompts: Bool?
 
     public init(targetShots: Int, imageFormat: String, highResolutionFrames: Bool, depthEnabled: Bool, videoFormat: String?, exposureLocked: Bool) {
         self.targetShots = targetShots
@@ -67,9 +74,31 @@ public struct CaptureSettingsRecord: Codable, Sendable, Equatable {
     }
 }
 
+/// Foreground masks saved next to the images.
+public struct MaskInfo: Codable, Sendable, Equatable {
+    /// `vision_preliminary`: Apple Vision subject lifting on device; the Mac may redo
+    /// them (BiRefNet / SAM 2) before COLMAP.
+    public var source: String
+    public var folder: String
+    /// `colmap`: masks/<image file name>.png, 8-bit, 255 = keep (object), 0 = ignore.
+    public var convention: String
+    public var count: Int
+
+    public static let visionPreliminary = "vision_preliminary"
+
+    public init(source: String = MaskInfo.visionPreliminary, folder: String = AssetLayout.masksFolder,
+                convention: String = "colmap: masks/<image file name>.png, 255 = object (keep), 0 = ignore",
+                count: Int) {
+        self.source = source
+        self.folder = folder
+        self.convention = convention
+        self.count = count
+    }
+}
+
 /// `meta.json` at the root of each asset folder.
 public struct AssetMeta: Codable, Sendable, Equatable, Identifiable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int = AssetMeta.currentSchemaVersion
     public var id: String
@@ -89,6 +118,12 @@ public struct AssetMeta: Codable, Sendable, Equatable, Identifiable {
     public var splatVersion: String?
     public var notes: String
     public var appVersion: String?
+    /// v2: `turntable` or `orbit` (nil in v1 files = orbit).
+    public var captureMode: CaptureMode?
+    /// v2: false for turntable captures — transforms.json has no object poses; run SfM.
+    public var posesValid: Bool?
+    /// v2: foreground masks saved with the shots, if any.
+    public var masks: MaskInfo?
 
     public init(
         id: String,

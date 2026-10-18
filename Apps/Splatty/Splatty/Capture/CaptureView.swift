@@ -9,7 +9,7 @@ struct CaptureView: View {
 
     var body: some View {
         ZStack {
-            ARCaptureView(controller: controller)
+            ARCaptureView(host: controller)
                 .ignoresSafeArea()
 
             if flash {

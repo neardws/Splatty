@@ -9,7 +9,8 @@ import Foundation
 ///       depth/frame_00001.png          16-bit PNG, millimetres (LiDAR only)
 ///       depth/frame_00001_conf.png     8-bit PNG, ARConfidenceLevel 0/1/2
 ///       transforms.json                Nerfstudio-format poses/intrinsics (msplat reads this)
-///       arkit/points3D.ply             seed points (ARKit features + LiDAR samples)
+///       arkit/points3D.ply             seed points (orbit mode only)
+///       masks/frame_00001.jpg.png      foreground mask, COLMAP naming (turntable mode)
 ///       splat/v001/                    (later, from the Mac mini)
 ///
 /// All paths inside transforms.json are relative to the asset root and never
@@ -19,11 +20,13 @@ public struct AssetLayout: Sendable, Equatable {
     public static let rawFolder = "raw"
     public static let depthFolder = "depth"
     public static let arkitFolder = "arkit"
+    public static let masksFolder = "masks"
     public static let splatFolder = "splat"
     public static let metaFile = "meta.json"
     public static let transformsFile = "transforms.json"
     public static let pointsFile = "points3D.ply"
     public static let coverFile = "cover.jpg"
+    public static let logFile = "capture_log.json"
 
     public let root: URL
 
@@ -34,7 +37,18 @@ public struct AssetLayout: Sendable, Equatable {
     public var raw: URL { root.appendingPathComponent(Self.rawFolder, isDirectory: true) }
     public var depth: URL { root.appendingPathComponent(Self.depthFolder, isDirectory: true) }
     public var arkit: URL { root.appendingPathComponent(Self.arkitFolder, isDirectory: true) }
+    public var masks: URL { root.appendingPathComponent(Self.masksFolder, isDirectory: true) }
+
+    /// COLMAP mask naming: `masks/<image file name>.png`.
+    public func maskURL(index: Int, imageExt: String) -> URL {
+        masks.appendingPathComponent("\(AssetNaming.frameStem(index)).\(imageExt).png")
+    }
+
+    public static func relativeMaskPath(index: Int, imageExt: String) -> String {
+        "\(masksFolder)/\(AssetNaming.frameStem(index)).\(imageExt).png"
+    }
     public var transforms: URL { root.appendingPathComponent(Self.transformsFile) }
+    public var log: URL { root.appendingPathComponent(Self.logFile) }
     public var points: URL { arkit.appendingPathComponent(Self.pointsFile) }
 
     public func imageURL(index: Int, ext: String) -> URL {

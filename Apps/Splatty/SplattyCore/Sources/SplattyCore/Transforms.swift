@@ -31,6 +31,24 @@ public struct FrameRecord: Equatable, Sendable, Codable {
     /// Elevation ring / azimuth bin at capture time (nil if not aimed at anchor).
     public var ring: Int?
     public var azimuthBin: Int?
+    /// False in turntable mode: `transform` is then the phone's ARKit pose, NOT the
+    /// camera-to-object pose, and is written as `device_transform_matrix` instead of
+    /// `transform_matrix` so nothing trains on it by accident.
+    public var poseValid: Bool = true
+    /// COLMAP-style mask (`masks/<image file name>.png`, white = object), also Nerfstudio `mask_path`.
+    public var maskFilePath: String?
+    /// Clockwise rotation (0/90/180/270) that makes the stored landscape image upright.
+    public var uprightRotationCW: Int?
+    /// How the phone was held (portrait / landscape_top_left / landscape_top_right / portrait_upside_down).
+    public var deviceOrientation: String?
+    /// World up in camera axes (OpenGL camera frame) — gravity is valid in every mode.
+    public var gravityCamera: [Double]?
+    /// Turntable: estimated object rotation (degrees, from image registration) at the shot.
+    public var objectRotationDegrees: Double?
+    /// Turntable: phone elevation above the object centre (degrees).
+    public var elevationDegrees: Double?
+    /// Turntable ring key: eye / high / top.
+    public var turntableRing: String?
 
     public init(
         index: Int,
@@ -88,6 +106,15 @@ public struct FrameRecord: Equatable, Sendable, Codable {
         case depthTimestamp = "depth_timestamp"
         case ring
         case azimuthBin = "azimuth_bin"
+        case poseValid = "pose_valid"
+        case deviceTransformMatrix = "device_transform_matrix"
+        case maskFilePath = "mask_path"
+        case uprightRotationCW = "upright_rotation_cw"
+        case deviceOrientation = "device_orientation"
+        case gravityCamera = "gravity_camera"
+        case objectRotationDegrees = "object_rotation_deg"
+        case elevationDegrees = "elevation_deg"
+        case turntableRing = "turntable_ring"
     }
 
     public init(from decoder: Decoder) throws {
@@ -96,7 +123,9 @@ public struct FrameRecord: Equatable, Sendable, Codable {
         filePath = try c.decode(String.self, forKey: .filePath)
         depthFilePath = try c.decodeIfPresent(String.self, forKey: .depthFilePath)
         confidenceFilePath = try c.decodeIfPresent(String.self, forKey: .confidenceFilePath)
-        let rows = try c.decode([[Double]].self, forKey: .transformMatrix)
+        poseValid = try c.decodeIfPresent(Bool.self, forKey: .poseValid) ?? true
+        let rows = try c.decodeIfPresent([[Double]].self, forKey: .transformMatrix)
+            ?? c.decode([[Double]].self, forKey: .deviceTransformMatrix)
         guard rows.count == 4, rows.allSatisfy({ $0.count == 4 }) else {
             throw DecodingError.dataCorruptedError(forKey: .transformMatrix, in: c, debugDescription: "expected 4x4")
         }
@@ -120,6 +149,13 @@ public struct FrameRecord: Equatable, Sendable, Codable {
         depthTimestamp = try c.decodeIfPresent(Double.self, forKey: .depthTimestamp)
         ring = try c.decodeIfPresent(Int.self, forKey: .ring)
         azimuthBin = try c.decodeIfPresent(Int.self, forKey: .azimuthBin)
+        maskFilePath = try c.decodeIfPresent(String.self, forKey: .maskFilePath)
+        uprightRotationCW = try c.decodeIfPresent(Int.self, forKey: .uprightRotationCW)
+        deviceOrientation = try c.decodeIfPresent(String.self, forKey: .deviceOrientation)
+        gravityCamera = try c.decodeIfPresent([Double].self, forKey: .gravityCamera)
+        objectRotationDegrees = try c.decodeIfPresent(Double.self, forKey: .objectRotationDegrees)
+        elevationDegrees = try c.decodeIfPresent(Double.self, forKey: .elevationDegrees)
+        turntableRing = try c.decodeIfPresent(String.self, forKey: .turntableRing)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -128,30 +164,60 @@ public struct FrameRecord: Equatable, Sendable, Codable {
         try c.encode(filePath, forKey: .filePath)
         try c.encodeIfPresent(depthFilePath, forKey: .depthFilePath)
         try c.encodeIfPresent(confidenceFilePath, forKey: .confidenceFilePath)
-        try c.encode(transform.m, forKey: .transformMatrix)
+        if poseValid {
+            try c.encode(transform.m, forKey: .transformMatrix)
+        } else {
+            try c.encode(false, forKey: .poseValid)
+            try c.encode(transform.m, forKey: .deviceTransformMatrix)
+        }
         try c.encode(intrinsics.fx, forKey: .flX)
         try c.encode(intrinsics.fy, forKey: .flY)
         try c.encode(intrinsics.cx, forKey: .cx)
         try c.encode(intrinsics.cy, forKey: .cy)
         try c.encode(intrinsics.width, forKey: .w)
         try c.encode(intrinsics.height, forKey: .h)
-        try c.encode(timestamp, forKey: .timestamp)
+        // JSONEncoder throws on NaN/inf (ARKit hi-res frames can report NaN light
+        // estimates / exposure offsets), which once silently killed transforms.json and
+        // meta.json for a whole capture. Required numbers fall back to 0, optionals are dropped.
+        try c.encode(Finite.or0(timestamp), forKey: .timestamp)
         try c.encode(capturedAt, forKey: .capturedAt)
-        try c.encode(exposureDuration, forKey: .exposureDuration)
-        try c.encode(exposureOffset, forKey: .exposureOffset)
-        try c.encodeIfPresent(ambientIntensity, forKey: .ambientIntensity)
-        try c.encodeIfPresent(ambientColorTemperature, forKey: .ambientColorTemperature)
+        try c.encode(Finite.or0(exposureDuration), forKey: .exposureDuration)
+        try c.encode(Finite.or0(exposureOffset), forKey: .exposureOffset)
+        try c.encodeIfPresent(Finite.orNil(ambientIntensity), forKey: .ambientIntensity)
+        try c.encodeIfPresent(Finite.orNil(ambientColorTemperature), forKey: .ambientColorTemperature)
         try c.encode(tracking, forKey: .tracking)
         try c.encode(highResolution, forKey: .highResolution)
-        try c.encodeIfPresent(depthTimestamp, forKey: .depthTimestamp)
+        try c.encodeIfPresent(Finite.orNil(depthTimestamp), forKey: .depthTimestamp)
         try c.encodeIfPresent(ring, forKey: .ring)
         try c.encodeIfPresent(azimuthBin, forKey: .azimuthBin)
+        try c.encodeIfPresent(maskFilePath, forKey: .maskFilePath)
+        try c.encodeIfPresent(uprightRotationCW, forKey: .uprightRotationCW)
+        try c.encodeIfPresent(deviceOrientation, forKey: .deviceOrientation)
+        try c.encodeIfPresent(gravityCamera.flatMap { $0.allSatisfy(\.isFinite) ? $0 : nil }, forKey: .gravityCamera)
+        try c.encodeIfPresent(Finite.orNil(objectRotationDegrees), forKey: .objectRotationDegrees)
+        try c.encodeIfPresent(Finite.orNil(elevationDegrees), forKey: .elevationDegrees)
+        try c.encodeIfPresent(turntableRing, forKey: .turntableRing)
     }
+}
+
+public extension FrameRecord {
+    /// Pose and intrinsics are all finite and usable (frames failing this are left out of transforms.json).
+    var hasFiniteGeometry: Bool {
+        transform.m.allSatisfy { $0.allSatisfy(\.isFinite) }
+            && [intrinsics.fx, intrinsics.fy, intrinsics.cx, intrinsics.cy].allSatisfy(\.isFinite)
+            && intrinsics.fx > 0 && intrinsics.fy > 0 && intrinsics.width > 0 && intrinsics.height > 0
+    }
+}
+
+/// NaN/inf guards for JSON encoding.
+public enum Finite {
+    public static func or0(_ v: Double) -> Double { v.isFinite ? v : 0 }
+    public static func orNil(_ v: Double?) -> Double? { v.flatMap { $0.isFinite ? $0 : nil } }
 }
 
 /// Nerfstudio-compatible `transforms.json` written to the asset root.
 public struct TransformsDocument: Equatable, Sendable, Codable {
-    public static let currentSplattyFormat = 1
+    public static let currentSplattyFormat = 2
 
     public var cameraModel: String = "OPENCV"
     public var intrinsics: Intrinsics
@@ -166,6 +232,12 @@ public struct TransformsDocument: Equatable, Sendable, Codable {
     public var objectAnchor: [Double]? = nil
     /// Seed point cloud (Nerfstudio/msplat `ply_file_path`), relative to the asset root.
     public var plyFilePath: String? = nil
+    /// `orbit` (ARKit poses valid) or `turntable` (poses must come from SfM on the Mac).
+    public var captureMode: CaptureMode = .orbit
+    /// False when frames carry no usable `transform_matrix` (turntable): run COLMAP first.
+    public var posesValid = true
+    /// Where `mask_path` masks came from, e.g. `vision_preliminary`.
+    public var maskSource: String? = nil
 
     public init(intrinsics: Intrinsics, frames: [FrameRecord]) {
         self.intrinsics = intrinsics
@@ -173,13 +245,24 @@ public struct TransformsDocument: Equatable, Sendable, Codable {
     }
 
     /// Builds a document whose top-level intrinsics come from the first frame.
-    public static func make(frames: [FrameRecord], objectAnchor: Vec3? = nil, plyFilePath: String? = nil) -> TransformsDocument? {
+    public static func make(frames: [FrameRecord], objectAnchor: Vec3? = nil, plyFilePath: String? = nil,
+                            captureMode: CaptureMode = .orbit, maskSource: String? = nil) -> TransformsDocument? {
+        let frames = frames.filter(\.hasFiniteGeometry)
         guard let first = frames.first else { return nil }
         var doc = TransformsDocument(intrinsics: first.intrinsics, frames: frames)
+        doc.captureMode = captureMode
+        if !captureMode.arkitPosesAreObjectPoses || frames.contains(where: { !$0.poseValid }) {
+            doc.posesValid = false
+            doc.poseSource = "none_needs_sfm"
+            doc.cameraConvention = "no object poses: frames carry device_transform_matrix (ARKit phone pose, world-static scene, NOT camera-to-object); images in sensor-native landscape orientation"
+        }
+        if frames.contains(where: { $0.maskFilePath != nil }) { doc.maskSource = maskSource }
         if frames.contains(where: { $0.depthFilePath != nil }) {
             doc.depthUnitScaleFactor = DepthEncoding.unitScaleFactor
         }
-        doc.objectAnchor = objectAnchor.map { [$0.x, $0.y, $0.z] }
+        doc.objectAnchor = objectAnchor.flatMap { a in
+            [a.x, a.y, a.z].allSatisfy(\.isFinite) ? [a.x, a.y, a.z] : nil
+        }
         doc.plyFilePath = plyFilePath
         return doc
     }
@@ -196,6 +279,9 @@ public struct TransformsDocument: Equatable, Sendable, Codable {
         case depthUnitScaleFactor = "depth_unit_scale_factor"
         case objectAnchor = "splatty_object_anchor"
         case plyFilePath = "ply_file_path"
+        case captureMode = "splatty_capture_mode"
+        case posesValid = "splatty_poses_valid"
+        case maskSource = "splatty_mask_source"
     }
 
     public init(from decoder: Decoder) throws {
@@ -221,6 +307,9 @@ public struct TransformsDocument: Equatable, Sendable, Codable {
         depthUnitScaleFactor = try c.decodeIfPresent(Double.self, forKey: .depthUnitScaleFactor)
         objectAnchor = try c.decodeIfPresent([Double].self, forKey: .objectAnchor)
         plyFilePath = try c.decodeIfPresent(String.self, forKey: .plyFilePath)
+        captureMode = try c.decodeIfPresent(CaptureMode.self, forKey: .captureMode) ?? .orbit
+        posesValid = try c.decodeIfPresent(Bool.self, forKey: .posesValid) ?? true
+        maskSource = try c.decodeIfPresent(String.self, forKey: .maskSource)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -244,6 +333,9 @@ public struct TransformsDocument: Equatable, Sendable, Codable {
         try c.encodeIfPresent(depthUnitScaleFactor, forKey: .depthUnitScaleFactor)
         try c.encodeIfPresent(objectAnchor, forKey: .objectAnchor)
         try c.encodeIfPresent(plyFilePath, forKey: .plyFilePath)
+        try c.encode(captureMode, forKey: .captureMode)
+        try c.encode(posesValid, forKey: .posesValid)
+        try c.encodeIfPresent(maskSource, forKey: .maskSource)
     }
 
     public func jsonData() throws -> Data {

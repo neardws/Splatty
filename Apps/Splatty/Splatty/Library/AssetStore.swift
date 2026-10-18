@@ -81,7 +81,7 @@ final class AssetStore {
     func clearShots(_ meta: AssetMeta) throws -> AssetMeta {
         let layout = layout(for: meta)
         let fm = FileManager.default
-        for url in [layout.raw, layout.depth, layout.arkit, layout.cover] where fm.fileExists(atPath: url.path) {
+        for url in [layout.raw, layout.depth, layout.arkit, layout.masks, layout.cover, layout.transforms, layout.log] where fm.fileExists(atPath: url.path) {
             try fm.removeItem(at: url)
         }
         var m = meta
