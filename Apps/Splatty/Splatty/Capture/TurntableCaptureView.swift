@@ -110,6 +110,14 @@ struct TurntableCaptureView: View {
                 moreMenu
             }
             statusBanner
+            if controller.suggestsExport, controller.phase == .capturing, !controller.keepGoing {
+                SoftExportBanner(
+                    shots: controller.shotCount,
+                    coveragePercent: Int((controller.azimuthCoverageFraction * 100).rounded()),
+                    onExport: close
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
             if let done = controller.completedRing, let next = controller.activeRing {
                 TurntableRingDoneCard(done: done, next: next,
                                       onDismiss: { controller.dismissRingCard() },
@@ -122,7 +130,8 @@ struct TurntableCaptureView: View {
                 TurntableDial(bins: controller.activeRing.map { controller.coverage.coveredBins($0) } ?? [],
                               angle: controller.ringAngle,
                               showNeedle: controller.activeRing != .top && controller.rotationReliable,
-                              count: controller.shotCount, target: controller.targetShots)
+                              count: controller.shotCount, target: controller.targetShots,
+                              coverageFraction: controller.azimuthCoverageFraction)
                     .frame(width: 190, height: 190)
                 Spacer()
             }
@@ -131,6 +140,7 @@ struct TurntableCaptureView: View {
         .padding()
         .animation(.easeInOut(duration: 0.2), value: controller.issue)
         .animation(.spring(duration: 0.35), value: controller.completedRing)
+        .animation(.easeInOut(duration: 0.25), value: controller.suggestsExport)
     }
 
     private var ringTitle: some View {
@@ -224,14 +234,16 @@ struct RotatingContainer<Content: View>: View {
     }
 }
 
-/// Coverage dial of the object's own rotation: green = shot, grey = still needed,
-/// white needle = estimated current angle. Big count in the middle.
+/// Object-azimuth coverage dial: red = missing, amber = approaching full ring,
+/// green = shot. White needle = estimated current angle. Big count in the middle.
 struct TurntableDial: View {
     let bins: [Bool]
     let angle: Double
     let showNeedle: Bool
     let count: Int
     let target: Int
+    /// Overall eye+high azimuth fraction 0…1 (drives empty-bin heat tint).
+    var coverageFraction: Double = 0
 
     var body: some View {
         ZStack {
@@ -241,7 +253,7 @@ struct TurntableDial: View {
                 let gap = n > 1 ? 0.012 : 0
                 Circle()
                     .trim(from: Double(i) / Double(n) + gap, to: Double(i + 1) / Double(n) - gap)
-                    .stroke(bins.indices.contains(i) && bins[i] ? Color.green : Color.white.opacity(0.3),
+                    .stroke(binColor(covered: bins.indices.contains(i) && bins[i]),
                             style: StrokeStyle(lineWidth: 18, lineCap: .butt))
                     .rotationEffect(.degrees(-90))
                     .padding(14)
@@ -254,9 +266,53 @@ struct TurntableDial: View {
             VStack(spacing: 0) {
                 Text("\(count)").font(.system(size: 52, weight: .heavy, design: .rounded)).monospacedDigit()
                 Text("/ \(target) 张").font(.headline)
+                Text("方位 \(Int((coverageFraction * 100).rounded()))%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.85))
             }
             .foregroundStyle(.white)
         }
+        .accessibilityLabel("物体方位覆盖 \(Int((coverageFraction * 100).rounded()))%，已拍 \(count) 张")
+    }
+
+    /// Red → amber → green heat for missing vs covered bins (wesbos-inspired).
+    private func binColor(covered: Bool) -> Color {
+        if covered { return .green }
+        // Empty bins stay warm (red/amber) so gaps read clearly; tint shifts toward
+        // amber as overall coverage grows (still clearly “needs shot”).
+        let t = min(1, max(0, coverageFraction))
+        return Color(red: 1.0, green: 0.22 + 0.45 * t, blue: 0.12)
+    }
+}
+
+/// Non-blocking soft-complete chip. Export is always available from the menu too.
+struct SoftExportBanner: View {
+    let shots: Int
+    let coveragePercent: Int
+    let onExport: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.title2)
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("可以导出了").font(.title3.bold())
+                Text("已拍 \(shots) 张 · 方位约 \(coveragePercent)% · 也可继续补拍")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            Spacer(minLength: 8)
+            Button(action: onExport) {
+                Text("导出").font(.headline.bold())
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent).tint(.green)
+        }
+        .foregroundStyle(.white)
+        .padding(14)
+        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityLabel("可以导出了，已拍 \(shots) 张")
     }
 }
 

@@ -40,23 +40,29 @@ Real desk problems we designed for:
    lifting draws a **yellow box** round the object. Exposure, white balance and focus lock.
    The voice says 「开始。手机别动，慢慢转物体，转一点停一下」.
 4. **Ring 1 · 平视** (phone about level, 10–20° above; −35…30° accepted): turn the object a bit and stop.
-   Every ~15° of object rotation, one auto shot (light tick and flash). The **dial** fills green and a
-   white needle shows the estimated angle. Big status text: 慢慢转物体 / 停一下 / 太快了 / 手机别动 /
-   手机抬高一点 / 对准物体 / 太暗了.
+   Every ~36° of object rotation (standard preset), one auto shot (light tick and flash). The **dial**
+   fills **red → amber → green** by azimuth sector and a white needle shows the estimated angle. Big
+   status text: 慢慢转物体 / 停一下 / 太快了 / 手机别动 / 手机抬高一点 / 对准物体 / 太暗了.
 5. Ring done: success haptic, voice 「这一圈拍完了。抬高手机，开始下一圈」, card with a bobbing arrow.
    Focus re-locks for the new distance.
 6. **Ring 2 · 斜上方** (32–64°): same, one turn.
-7. **Ring 3 · 正上方** (≥ 66°): 3 top-down shots. Turn the object about a third between them; each fires
+7. **Ring 3 · 正上方** (≥ 66°): a few top-down shots. Turn the object about a third between them; each fires
    when the view changed enough and is steady (≥ 1.5 s apart).
-8. **「可以了！共 N 张」** (voice too) with 完成 / 继续补拍. Rings can be skipped from the menu, and there's a manual shutter.
+8. **Soft 「可以导出了」** (wesbos-style): when eye+high azimuth coverage ≥ ~85% **and** shots ≥ 12
+   (standard), a non-blocking banner appears with 导出. **Save/Export is never disabled** for incomplete
+   coverage — the menu always has 「现在就结束」. Full plan complete still shows **「可以了！共 N 张」**
+   with 完成 / 继续补拍. Rings can be skipped from the menu, and there's a manual shutter.
 
 ### Photo budget (turntable)
 
-| Preset | 平视 bins | 斜上方 bins | 正上方 | Done at (92 %) | Max |
-|---|---|---|---|---|---|
-| 快速 | 16 (22.5°) | 12 (30°) | 2 | 29 | 30 |
-| **标准** | **24 (15°)** | **20 (18°)** | **3** | **45** | 47 |
-| 精细 | 36 (10°) | 28 (≈13°) | 4 | 64 | 68 |
+少拍 first step (2026-10-24): standard target moved into the **12–20** range. Soft export suggestion
+fires earlier than plan-complete.
+
+| Preset | 平视 bins | 斜上方 bins | 正上方 | Done at (92 %) | Soft「可以导出了」 | Max |
+|---|---|---|---|---|---|---|
+| 快速 | 8 (45°) | 4 (90°) | 1 | 13 | ≥8 张且方位≥85% | 13 |
+| **标准** | **10 (36°)** | **6 (60°)** | **2** | **18** | **≥12 张且方位≥85%** | **18** |
+| 精细 | 16 (22.5°) | 12 (30°) | 3 | 30 | ≥16 张且方位≥85% | 31 |
 
 ### How rotation is detected (no markers)
 

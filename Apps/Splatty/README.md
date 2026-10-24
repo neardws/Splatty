@@ -76,7 +76,7 @@ deletes it (with confirmation).
   reason (太快 / 太暗 / 跟踪不稳 / 太近 / 太远)
 - Haptic tick per shot, success haptic + "next ring" card when a ring completes, "可以了"
   with 完成 / 继续补拍 at the end. Rings can be skipped (… menu or the ring card)
-- Default plan **标准**: 24 + 12 + 12 bins, done at 44 photos (快速 31, 精细 65; set on the object page)
+- Turntable default plan **标准**: 10 + 6 + 2 bins, done at ~18 photos (快速 ~13, 精细 ~30); soft 「可以导出了」 at ~85% azimuth + ≥12 shots — never blocks export
 - Per shot (unchanged): hi-res still via `captureHighResolutionFrame` (falls back to the video
   frame), intrinsics scaled to the saved image, c2w pose, timestamps, exposure/light, tracking.
   LiDAR depth (16-bit mm PNG) + confidence when enabled. Seed points go to `arkit/points3D.ply`

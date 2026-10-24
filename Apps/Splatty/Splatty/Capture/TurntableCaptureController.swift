@@ -69,6 +69,14 @@ final class TurntableCaptureController: NSObject, ARCaptureHost {
     let depthSupported: Bool
     private(set) var meta: AssetMeta
     var targetShots: Int { plan.targetShots(skipping: skippedRings) }
+    /// Soft 「可以导出了」 (coverage ≥ ~85% + enough frames). Never blocks export.
+    var suggestsExport: Bool {
+        coverage.suggestsExport(shotCount: shotCount, skipping: skippedRings)
+    }
+    /// Mean eye+high azimuth coverage 0…1 for the dial / banner.
+    var azimuthCoverageFraction: Double {
+        coverage.azimuthFraction(skipping: skippedRings)
+    }
 
     // MARK: Internal
     @ObservationIgnored private weak var arView: ARView?
