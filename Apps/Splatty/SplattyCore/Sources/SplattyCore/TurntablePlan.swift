@@ -42,33 +42,64 @@ public enum HeightMove: Equatable, Sendable {
     case lower
 }
 
+/// Soft “可以导出了” thresholds (never blocks Save/Export — UI suggestion only).
+/// Inspired by wesbos coverage UX: coverage ≥ ~85% and enough frames.
+public struct TurntableExportSuggestion: Equatable, Sendable {
+    /// Fraction of azimuth bins (eye + high) with ≥1 shot.
+    public var azimuthFraction: Double
+    public var shotCount: Int
+    public var minShots: Int
+    public var coverageThreshold: Double
+    /// True when soft-complete criteria are met.
+    public var ready: Bool
+
+    public init(azimuthFraction: Double, shotCount: Int, minShots: Int,
+                coverageThreshold: Double, ready: Bool) {
+        self.azimuthFraction = azimuthFraction
+        self.shotCount = shotCount
+        self.minShots = minShots
+        self.coverageThreshold = coverageThreshold
+        self.ready = ready
+    }
+}
+
 /// Shots per ring for turntable mode.
 ///
-/// Standard: 24 bins (15°) at eye level, 20 bins (18°) high, 3 top-down shots. A ring
-/// counts as done at 92 % of its bins → 23 + 19 + 3 = 45 photos (47 max).
+/// Standard (少拍 first step): 10 bins (36°) at eye, 6 bins (60°) high, 2 top-down.
+/// A ring counts as done at 92 % of its bins → about 18 photos (18 max). Soft
+/// 「可以导出了」fires earlier at ~85% azimuth coverage and ≥12 frames.
 public struct TurntablePlan: Equatable, Sendable {
     public var eyeBins: Int
     public var highBins: Int
     public var topShots: Int
     public var requiredFraction: Double = 0.92
+    /// Soft-export azimuth coverage threshold (wesbos-style, never blocks export).
+    public var suggestCoverageFraction: Double = 0.85
+    /// Soft-export minimum photo count (inclusive).
+    public var suggestMinShots: Int = 12
     public var order: [TurntableRing] = [.eye, .high, .top]
     /// Elevation bands (degrees, phone above object centre).
     public var eyeBand: ClosedRange<Double> = -35...30
     public var highBand: ClosedRange<Double> = 32...64
     public var topBand: ClosedRange<Double> = 66...90
 
-    public init(eyeBins: Int, highBins: Int, topShots: Int) {
+    public init(eyeBins: Int, highBins: Int, topShots: Int,
+                suggestMinShots: Int? = nil) {
         precondition(eyeBins > 0 && highBins > 0 && topShots >= 0)
         self.eyeBins = eyeBins
         self.highBins = highBins
         self.topShots = topShots
+        if let suggestMinShots { self.suggestMinShots = suggestMinShots }
     }
 
     public static func preset(_ p: CapturePlan.Preset) -> TurntablePlan {
         switch p {
-        case .quick: TurntablePlan(eyeBins: 16, highBins: 12, topShots: 2)
-        case .standard: TurntablePlan(eyeBins: 24, highBins: 20, topShots: 3)
-        case .detailed: TurntablePlan(eyeBins: 36, highBins: 28, topShots: 4)
+        // ~12 photos done-at; soft suggest from 8.
+        case .quick: TurntablePlan(eyeBins: 8, highBins: 4, topShots: 1, suggestMinShots: 8)
+        // ~18 photos done-at; soft suggest from 12 (少拍 onboarding).
+        case .standard: TurntablePlan(eyeBins: 10, highBins: 6, topShots: 2, suggestMinShots: 12)
+        // ~30 photos for users who want denser views.
+        case .detailed: TurntablePlan(eyeBins: 16, highBins: 12, topShots: 3, suggestMinShots: 16)
         }
     }
 
@@ -194,5 +225,45 @@ public struct TurntableCoverage: Equatable, Sendable {
     /// First ring (plan order) still needing shots; nil when done.
     public func activeRing(skipping skipped: Set<TurntableRing> = []) -> TurntableRing? {
         plan.order.first { !isComplete($0, skipped: skipped) }
+    }
+
+    /// Mean fraction of azimuth bins covered on eye + high (top excluded: sparse slots).
+    /// Skipped rings are omitted from the average; if all skipped, returns 1.
+    public func azimuthFraction(skipping skipped: Set<TurntableRing> = []) -> Double {
+        let rings = [TurntableRing.eye, .high].filter { !skipped.contains($0) && plan.bins($0) > 0 }
+        guard !rings.isEmpty else { return 1 }
+        let sum = rings.map { Double(coveredCount($0)) / Double(plan.bins($0)) }.reduce(0, +)
+        return sum / Double(rings.count)
+    }
+
+    /// Soft 「可以导出了」: azimuth coverage ≥ threshold and enough frames.
+    /// Never disables Save/Export — callers only show a suggestion.
+    public func exportSuggestion(
+        shotCount: Int,
+        skipping skipped: Set<TurntableRing> = [],
+        coverageThreshold: Double? = nil,
+        minShots: Int? = nil
+    ) -> TurntableExportSuggestion {
+        let thr = coverageThreshold ?? plan.suggestCoverageFraction
+        let minN = minShots ?? plan.suggestMinShots
+        let frac = azimuthFraction(skipping: skipped)
+        return TurntableExportSuggestion(
+            azimuthFraction: frac,
+            shotCount: shotCount,
+            minShots: minN,
+            coverageThreshold: thr,
+            ready: shotCount >= minN && frac + 1e-9 >= thr
+        )
+    }
+
+    /// Convenience for `exportSuggestion(...).ready`.
+    public func suggestsExport(
+        shotCount: Int,
+        skipping skipped: Set<TurntableRing> = [],
+        coverageThreshold: Double? = nil,
+        minShots: Int? = nil
+    ) -> Bool {
+        exportSuggestion(shotCount: shotCount, skipping: skipped,
+                         coverageThreshold: coverageThreshold, minShots: minShots).ready
     }
 }

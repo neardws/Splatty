@@ -22,17 +22,25 @@ func lookAt(_ position: Vec3, _ target: Vec3, roll: Double = 0) -> Mat4 {
 }
 
 final class TurntablePlanTests: XCTestCase {
-    func testStandardBudgetIsAbout45() {
+    func testStandardBudgetIsAbout12to20() {
         let p = TurntablePlan.standard
-        XCTAssertEqual(p.required(.eye), 23)
-        XCTAssertEqual(p.required(.high), 19)
-        XCTAssertEqual(p.required(.top), 3)
-        XCTAssertEqual(p.targetShots(), 45)
-        XCTAssertEqual(p.maxShots, 47)
-        XCTAssertTrue((40...50).contains(p.targetShots()))
-        XCTAssertLessThan(TurntablePlan.preset(.quick).targetShots(), p.targetShots())
+        // 10 + 6 + 2 bins; done at 92% → 10 + 6 + 2 = 18 (少拍 onboarding).
+        XCTAssertEqual(p.eyeBins, 10)
+        XCTAssertEqual(p.highBins, 6)
+        XCTAssertEqual(p.topShots, 2)
+        XCTAssertEqual(p.required(.eye), 10)
+        XCTAssertEqual(p.required(.high), 6)
+        XCTAssertEqual(p.required(.top), 2)
+        XCTAssertEqual(p.targetShots(), 18)
+        XCTAssertEqual(p.maxShots, 18)
+        XCTAssertTrue((12...20).contains(p.targetShots()))
+        XCTAssertEqual(p.suggestMinShots, 12)
+        XCTAssertEqual(p.suggestCoverageFraction, 0.85, accuracy: 1e-9)
+        let quick = TurntablePlan.preset(.quick)
+        XCTAssertLessThan(quick.targetShots(), p.targetShots())
+        XCTAssertTrue((8...14).contains(quick.targetShots()))
         XCTAssertGreaterThan(TurntablePlan.preset(.detailed).targetShots(), p.targetShots())
-        XCTAssertEqual(p.targetShots(skipping: [.top]), 42)
+        XCTAssertEqual(p.targetShots(skipping: [.top]), 16)
     }
 
     func testHeightMove() {
@@ -48,25 +56,62 @@ final class TurntablePlanTests: XCTestCase {
     func testCoverageBinsRelativeToRingStartAndWrap() {
         var c = TurntableCoverage(plan: .standard)
         c.begin(.eye, at: 100)
+        // 10 bins → 36° each.
         XCTAssertEqual(c.bin(.eye, progressDegrees: 100), 0)
-        XCTAssertEqual(c.bin(.eye, progressDegrees: 116), 1)
-        XCTAssertEqual(c.bin(.eye, progressDegrees: 100 + 359), 23)
+        XCTAssertEqual(c.bin(.eye, progressDegrees: 100 + 36), 1)
+        XCTAssertEqual(c.bin(.eye, progressDegrees: 100 + 359), 9)
         XCTAssertEqual(c.bin(.eye, progressDegrees: 100 + 361), 0, "second lap wraps")
-        XCTAssertEqual(c.bin(.eye, progressDegrees: 90), 23, "turning back a bit")
+        XCTAssertEqual(c.bin(.eye, progressDegrees: 90), 9, "turning back a bit")
     }
 
     func testFullTurnCompletesEyeRingThenHighThenTop() {
         var c = TurntableCoverage(plan: .standard)
         XCTAssertEqual(c.activeRing(), .eye)
         var a = 0.0
-        while a < 360 { c.record(.eye, progressDegrees: a); a += 15 }
-        XCTAssertEqual(c.coveredCount(.eye), 24)
+        while a < 360 { c.record(.eye, progressDegrees: a); a += 36 }
+        XCTAssertEqual(c.coveredCount(.eye), 10)
         XCTAssertEqual(c.activeRing(), .high)
-        for i in 0..<19 { c.record(.high, progressDegrees: 500 + Double(i) * 18) }
+        for i in 0..<6 { c.record(.high, progressDegrees: 500 + Double(i) * 60) }
         XCTAssertEqual(c.activeRing(), .top)
-        for _ in 0..<3 { c.record(.top, progressDegrees: 0) }
+        for _ in 0..<2 { c.record(.top, progressDegrees: 0) }
         XCTAssertNil(c.activeRing())
         XCTAssertEqual(c.activeRing(skipping: []), nil)
+    }
+
+    func testAzimuthFractionAndSoftExportSuggestion() {
+        var c = TurntableCoverage(plan: .standard)
+        // Empty → not ready.
+        var s = c.exportSuggestion(shotCount: 0)
+        XCTAssertEqual(s.azimuthFraction, 0, accuracy: 1e-9)
+        XCTAssertFalse(s.ready)
+        XCTAssertFalse(c.suggestsExport(shotCount: 12))
+
+        // Fill 9/10 eye bins and 5/6 high → (0.9+~0.833)/2 ≈ 0.866 ≥ 0.85.
+        for i in 0..<9 { c.record(.eye, progressDegrees: Double(i) * 36) }
+        for i in 0..<5 { c.record(.high, progressDegrees: Double(i) * 60) }
+        let frac = c.azimuthFraction()
+        XCTAssertGreaterThanOrEqual(frac, 0.85)
+        XCTAssertFalse(c.suggestsExport(shotCount: 11), "needs ≥12 shots even when coverage is high")
+        XCTAssertTrue(c.suggestsExport(shotCount: 12))
+        s = c.exportSuggestion(shotCount: 12)
+        XCTAssertTrue(s.ready)
+        XCTAssertEqual(s.minShots, 12)
+        XCTAssertEqual(s.coverageThreshold, 0.85, accuracy: 1e-9)
+
+        // Soft complete must not require the plan to be finished.
+        XCTAssertNotNil(c.activeRing(), "plan still has remaining bins/top shots")
+
+        // Below coverage threshold even with many shots.
+        var sparse = TurntableCoverage(plan: .standard)
+        for i in 0..<4 { sparse.record(.eye, progressDegrees: Double(i) * 36) }
+        XCTAssertLessThan(sparse.azimuthFraction(), 0.85)
+        XCTAssertFalse(sparse.suggestsExport(shotCount: 40))
+
+        // Skipping high: only eye counts toward azimuth fraction.
+        var eyeOnly = TurntableCoverage(plan: .standard)
+        for i in 0..<9 { eyeOnly.record(.eye, progressDegrees: Double(i) * 36) }
+        XCTAssertEqual(eyeOnly.azimuthFraction(skipping: [.high]), 0.9, accuracy: 1e-9)
+        XCTAssertTrue(eyeOnly.suggestsExport(shotCount: 12, skipping: [.high]))
     }
 
     func testRemoveUndoesRecord() {
@@ -341,9 +386,9 @@ final class TurntableGateTests: XCTestCase {
             }
         }
         XCTAssertNotEqual(cov.activeRing(), .eye)
-        XCTAssertGreaterThanOrEqual(shots, 23)
-        XCTAssertLessThanOrEqual(shots, 24)
-        XCTAssertGreaterThanOrEqual(trueAngle, 320)
+        XCTAssertGreaterThanOrEqual(shots, 10)
+        XCTAssertLessThanOrEqual(shots, 10)
+        XCTAssertGreaterThanOrEqual(trueAngle, 300)
         XCTAssertLessThan(time, 40, "a ring should take well under a minute")
     }
 }
